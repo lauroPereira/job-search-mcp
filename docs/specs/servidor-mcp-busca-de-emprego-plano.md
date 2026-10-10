@@ -48,7 +48,7 @@ tests/
 | id | inteiro, chave | |
 | company | texto, obrigatório | |
 | title | texto, obrigatório | |
-| url | texto, único | usado para evitar duplicidade |
+| url | texto, único, obrigatório | usado para evitar duplicidade |
 | track | texto | data, systems, product, ai, other |
 | score | real | 0 a 10 |
 | status | texto, obrigatório | lista fechada, ver abaixo |
@@ -88,12 +88,12 @@ Ferramentas MCP (contrato público do projeto):
 | Ferramenta | Parâmetros | Retorno |
 |---|---|---|
 | `list_jobs` | `status?`, `track?`, `min_score?` | lista de vagas |
-| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada, ou erro de duplicidade com a vaga existente |
-| `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas |
+| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada no status `suggested`, ou erro de duplicidade com a vaga existente |
+| `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas; ao mudar para `applied` sem data de candidatura (nem gravada nem informada), `applied_on` recebe a data de referência, com a linha de histórico correspondente |
 | `list_contacts` | `status?`, `company?` | lista de contatos |
 | `log_interaction` | `contact_id`, `summary`, `date?`, `status?`, `next_step?` | contato atualizado, follow-up novo e vaga vinculada, se houver |
 | `pending_followups` | `reference_date?`, `days_ahead?` (padrão 2) | vagas e contatos, cada um com `follow_up` e `state` (overdue, due_soon) |
-| `daily_summary` | `reference_date?` | contagem por status, vencidos, a vencer, fila de candidatura por nota e dias até um prazo opcional |
+| `daily_summary` | `reference_date?`, `deadline?` | contagem de vagas por status, contagem de contatos ativos (os que não estão em `closed`), vencidos, a vencer, fila de candidatura por nota e dias até o prazo (`deadline`), quando informado |
 
 Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado, renomear ferramenta ou parâmetro passa a ser mudança incompatível.
 
@@ -104,7 +104,6 @@ Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado,
 - **Unidade (resumo):** com os dados sintéticos e data fixa, conferir contagens, vencidos, a vencer e a ordem da fila.
 - **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do pacote fastmcp (`from fastmcp import Client`), para confirmar nomes, parâmetros e formato de retorno, incluindo a saída estruturada (decisão 0003).
 - **Verificação manual:** conectar o servidor ao Claude Code por stdio e executar os cinco casos de uso da especificação; registrar o resultado em `docs/evidence/`.
-- **Privacidade:** um teste confere que os arquivos de `data/seed/` só usam empresas e nomes de uma lista fictícia.
 
 ## Riscos técnicos
 
