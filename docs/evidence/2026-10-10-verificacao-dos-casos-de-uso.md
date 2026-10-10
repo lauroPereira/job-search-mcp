@@ -11,6 +11,7 @@ Os pedidos em linguagem natural abaixo descrevem a situação de cada caso de us
 ## Método
 
 - **Versão:** branch `feat/07-readme-e-evidencia`, sobre o commit `3bcfac0` da tarefa 06 (`feat/06-servidor-mcp`). A tarefa 07 não altera código.
+- **Reexecução depois da revisão:** os cinco casos foram executados de novo, do mesmo modo e em banco novo, sobre o commit `a1961d5` da tarefa 06 (com as correções da revisão: validação de `track` e `score` em `add_job`, tratamento de erro do `--seed`). Todos os retornos registrados abaixo se repetiram, exceto o horário de criação da vaga do caso 4; nenhum retorno citado mudou com a validação nova. Nessa reexecução foi lida, direto no banco, a linha de histórico do caso 2, e foram feitas as duas chamadas de validação acrescentadas ao caso 4.
 - **Ambiente:** Windows 11, Python 3.12.7. Ambiente virtual novo, criado só para esta verificação, com `pip install -e .` (sem as dependências de desenvolvimento), como descrito no README: `fastmcp` 4.1.0 e `mcp` 2.3.0.
 - **Banco:** arquivo novo em diretório temporário, fora do repositório, indicado por `JOB_SEARCH_DB` e preenchido com `job-search-mcp --seed` (15 vagas e 8 contatos sintéticos de `data/seed/`). O comando respondeu `Demo data loaded into <diretório temporário>/demo.db.` (código 0).
 - **Servidor:** o executável `job-search-mcp` do ambiente virtual, iniciado como subprocesso pelo cliente.
@@ -77,11 +78,19 @@ Cada ferramenta veio com descrição. Saída de erro do servidor: só a linha de
 | `follow_up` | 2026-03-22 |
 | `job` | id 1, Banco Aurora, Data Engineer, `last_contact_on` 2026-03-16 (era 2026-03-09), `follow_up` 2026-03-23 |
 
-**Conferência:** o follow-up do contato foi recalculado (data da interação mais 6 dias) e a data do último contato da vaga vinculada foi atualizada (follow-up da vaga: mais 7 dias).
+**Histórico da vaga vinculada:** a ferramenta não devolve a linha de histórico no retorno; ela foi lida direto no banco depois da chamada (`SELECT * FROM job_history`). A interação criou uma linha, a única da tabela nesse momento:
+
+| `job_id` | `date` | `field` | `old_value` | `new_value` | `source` |
+|---|---|---|---|---|---|
+| 1 | 2026-03-16 | last_contact_on | 2026-03-09 | 2026-03-16 | contact_interaction |
+
+A data da linha é a data da interação (2026-03-16), e não a data real da execução. A tabela `interaction` ficou com uma linha: contato 1, 2026-03-16, "Respondeu que a indicação foi encaminhada ao RH".
+
+**Conferência:** o follow-up do contato foi recalculado (data da interação mais 6 dias), a data do último contato da vaga vinculada foi atualizada (follow-up da vaga: mais 7 dias) e a mudança na vaga ficou no histórico, com valor anterior, valor novo e a origem `contact_interaction`.
 
 **Chamada 3 (erro):** `log_interaction(contact_id=1, summary="Conversa marcada", date="2999-01-01")`
 
-**Retorno:** `{"error": "invalid_date", "detail": "Invalid date '2999-01-01': it cannot be after today (2026-10-10)."}`. Nada foi gravado.
+**Retorno:** `{"error": "invalid_date", "detail": "Invalid date '2999-01-01': it cannot be after today (2026-10-10)."}`. Nada foi gravado: as tabelas `interaction` e `job_history` continuaram com uma linha cada.
 
 ## Caso 3: candidatura feita
 
@@ -124,6 +133,10 @@ Cada ferramenta veio com descrição. Saída de erro do servidor: só a linha de
 
 **Retorno:** `jobs` com 16 vagas: as 15 do seed e a nova. A segunda chamada não criou outra linha.
 
+**Chamadas 5 e 6 (validação de trilha e nota, feitas na reexecução, depois do caso 5):** `add_job(company="Empresa Exemplo", title="X", url="https://vagas.example.com/empresa-exemplo/analytics-engineer/2", track="dados")` e a mesma chamada com `score=11` no lugar de `track`.
+
+**Retornos:** `{"error": "invalid_input", "detail": "Invalid track 'dados'. Valid tracks: data, systems, product, ai, other.", "valid_tracks": ["data", "systems", "product", "ai", "other"]}` e `{"error": "invalid_input", "detail": "Invalid score '11.0'. Use a number from 0 to 10."}`. Nenhuma vaga foi criada: o banco terminou com 16 vagas.
+
 ## Caso 5: cobrança pendente
 
 **Pedido:** "Quem eu preciso cobrar?"
@@ -153,7 +166,7 @@ Cada ferramenta veio com descrição. Saída de erro do servidor: só a linha de
 ## Limitações
 
 - Cliente programático, e não um agente: ver o início deste documento.
-- Executado em uma máquina, com Windows 11. Linux e macOS não foram verificados à mão; o CI roda a suíte em Ubuntu, incluindo o teste que sobe o servidor por stdio.
+- Executado em uma máquina, com Windows 11. Linux e macOS não foram verificados à mão; o CI roda a suíte em Ubuntu, incluindo os testes que sobem o servidor por stdio.
 - O script da verificação não foi versionado; os mesmos passos podem ser refeitos com qualquer cliente MCP, a partir das chamadas listadas aqui.
 
 ## Pendências para o responsável humano

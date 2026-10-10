@@ -2,7 +2,7 @@
 
 Servidor [MCP](https://modelcontextprotocol.io) que dá a um agente de IA as ferramentas para gerir uma busca de emprego: vagas, contatos de networking, follow-ups e um resumo do que fazer hoje.
 
-> **Estado:** MVP implementado em `develop`. As sete ferramentas funcionam por stdio, com testes automatizados e dados de demonstração sintéticos. Os cinco casos de uso foram verificados por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)); a verificação manual em uma conversa no Claude Code ou no Claude Desktop ainda está pendente. Ainda não há versão publicada (tag).
+> **Estado:** MVP implementado. A versão estável fica em `main` e o desenvolvimento em `develop`; enquanto a primeira versão não é promovida para `main`, o código está só na branch `develop` (`git clone --branch develop`, como na [instalação](#instalação)). As sete ferramentas funcionam por stdio, com testes automatizados e dados de demonstração sintéticos. Os cinco casos de uso foram verificados por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)); a verificação manual em uma conversa no Claude Code ou no Claude Desktop ainda está pendente. Ainda não há versão publicada (tag).
 
 ## Por que este projeto existe
 
@@ -21,22 +21,25 @@ flowchart LR
 
     client -- "stdio: chamada de ferramenta" --> server
     server -- "objeto estruturado" --> client
-    server -- "funções Python" --> domain
-    domain -- "db.py (sqlite3)" --> database
+    server -- "abre a conexão e cria o esquema" --> database
+    server -- "funções Python, com a conexão aberta" --> domain
+    domain -- "lê e grava pela conexão recebida" --> database
 ```
 
-- O **servidor** só registra as ferramentas, converte entrada e saída e aplica o padrão "hoje" para as datas. Não tem regra de negócio.
-- O **domínio** são funções Python que recebem a conexão e a data de referência; por isso são testadas sem subir o servidor.
+- O **servidor** registra as ferramentas, converte entrada e saída e aplica o padrão "hoje" para as datas. A cada chamada, é ele que abre a conexão com o banco (por `db.py`), cria o esquema se o banco for novo e fecha a conexão no fim. Não tem regra de negócio.
+- O **domínio** são funções Python que recebem a conexão já aberta e a data de referência; não abrem o banco nem leem o relógio, e por isso são testadas sem subir o servidor.
 - O **banco** é um arquivo SQLite na máquina de quem usa, no caminho da variável `JOB_SEARCH_DB`.
 
 ## Ferramentas
 
-Todas devolvem um objeto estruturado. Datas são texto no formato ISO 8601 (`AAAA-MM-DD`). Parâmetros com `?` são opcionais.
+Todas devolvem um objeto estruturado, tanto no resultado quanto no erro de negócio. A exceção são os erros de protocolo: argumento de tipo errado (por exemplo `job_id="abc"`), parâmetro obrigatório ausente ou parâmetro desconhecido são recusados antes de a ferramenta rodar e chegam ao cliente como erro em texto, como é padrão no MCP.
+
+Datas são texto no formato ISO 8601 (`AAAA-MM-DD`). Parâmetros com `?` são opcionais.
 
 | Ferramenta | Parâmetros | Retorno |
 |---|---|---|
 | `list_jobs` | `status?`, `track?`, `min_score?` | `jobs`: lista de vagas, cada uma com o `follow_up` calculado |
-| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | a vaga criada, no status `suggested`; se o link já existir, o erro `duplicate_url` com a vaga existente |
+| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | a vaga criada, no status `suggested`; se o link já existir, o erro `duplicate_url` com a vaga existente; `track` ou `score` fora da faixa, o erro `invalid_input` |
 | `update_job` | `job_id`, `source`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?` | `job` (a vaga atualizada) e `history` (uma linha por campo alterado, com valor anterior, valor novo e origem) |
 | `list_contacts` | `status?`, `company?` | `contacts`: lista de contatos, cada um com o `follow_up` calculado |
 | `log_interaction` | `contact_id`, `summary`, `date?` (padrão: hoje), `status?`, `next_step?` | `contact` (atualizado), `follow_up` (novo) e `job` (a vaga vinculada, ou nulo) |
@@ -49,7 +52,8 @@ Regras principais:
 - Vagas e contatos em status encerrado, ou que ainda não começaram, não geram follow-up.
 - **Status de vaga:** `suggested`, `to_apply`, `blocked`, `applied`, `in_review`, `hr_interview`, `tech_interview`, `manager_interview`, `offer`, `hired`, `rejected`, `withdrawn`, `closed`.
 - **Status de contato:** `to_contact`, `awaiting_reply`, `in_conversation`, `resume_sent`, `referred`, `closed`.
-- **Erros de negócio** (link duplicado, status inválido, data inválida ou futura, registro inexistente) voltam como um objeto com `error` (código) e `detail` (mensagem), para o agente explicar o que houve.
+- **Trilha e nota no cadastro:** em `add_job`, `track` é opcional e, quando informado, deve ser um de `data`, `systems`, `product`, `ai`, `other`; `score` é opcional e, quando informado, deve ser um número de 0 a 10. Fora disso, nada é criado e o retorno é o erro `invalid_input` (no caso de `track`, com a lista em `valid_tracks`).
+- **Erros de negócio** voltam como um objeto com `error` (código) e `detail` (mensagem), para o agente explicar o que houve. Os códigos são `duplicate_url` (link já cadastrado), `invalid_status`, `invalid_date` (data inválida ou futura), `invalid_input` (campo obrigatório vazio, `track` ou `score` fora da faixa, `days_ahead` negativo) e `not_found` (registro inexistente).
 
 Detalhes em [`docs/specs/servidor-mcp-busca-de-emprego.md`](docs/specs/servidor-mcp-busca-de-emprego.md) e no [plano](docs/specs/servidor-mcp-busca-de-emprego-plano.md).
 
@@ -57,12 +61,14 @@ Detalhes em [`docs/specs/servidor-mcp-busca-de-emprego.md`](docs/specs/servidor-
 
 Requisitos: Python 3.12 ou mais novo e Git.
 
-Linux e macOS:
+A versão estável fica em `main` e o desenvolvimento em `develop`. Enquanto a primeira versão não é promovida para `main`, um clone sem `--branch` não traz o código; por isso os comandos abaixo clonam a branch `develop`. Depois da promoção, tire o `--branch develop` para ficar na versão estável.
+
+Linux e macOS (nesses sistemas o interpretador costuma se chamar `python3`; depois de ativar o ambiente virtual, `python` e `pip` já são os dele):
 
 ```bash
-git clone https://github.com/lauroPereira/job-search-mcp.git
+git clone --branch develop https://github.com/lauroPereira/job-search-mcp.git
 cd job-search-mcp
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
 ```
@@ -70,18 +76,28 @@ pip install -e .
 Windows (PowerShell):
 
 ```powershell
-git clone https://github.com/lauroPereira/job-search-mcp.git
+git clone --branch develop https://github.com/lauroPereira/job-search-mcp.git
 cd job-search-mcp
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e .
 ```
 
+Se o PowerShell recusar o `Activate.ps1` por causa da política de execução de scripts, não é preciso mudar a política nem ativar o ambiente: chame os executáveis do `.venv` diretamente.
+
+```powershell
+.venv\Scripts\python.exe -m pip install -e .
+```
+
+Nesse caso, onde este README diz `job-search-mcp`, use `.venv\Scripts\job-search-mcp.exe`.
+
 A instalação é em modo editável (`-e`) e cria o comando `job-search-mcp` dentro do ambiente virtual: `.venv/bin/job-search-mcp` no Linux e no macOS, `.venv\Scripts\job-search-mcp.exe` no Windows.
 
 ## Dados de demonstração
 
 O servidor lê e grava em um único arquivo SQLite, indicado pela variável de ambiente `JOB_SEARCH_DB`. Sem a variável, usa `data/local/job_search.db` dentro do clone, pasta ignorada pelo Git.
+
+**Use sempre um caminho absoluto em `JOB_SEARCH_DB`.** Um caminho relativo é resolvido a partir do diretório de trabalho do processo, e quem inicia o servidor é o cliente MCP, em um diretório que você não controla: o `--seed` rodado no terminal e o servidor iniciado pelo cliente acabariam em arquivos diferentes.
 
 Para experimentar com os dados sintéticos de `data/seed/` (15 vagas e 8 contatos fictícios), aponte a variável para um arquivo novo e carregue o seed.
 
@@ -99,7 +115,7 @@ $env:JOB_SEARCH_DB = "C:\caminho\absoluto\para\job_search_demo.db"
 job-search-mcp --seed
 ```
 
-O comando cria o banco, carrega os dados e encerra. Se o banco já tiver dados, ele recusa e não altera nada. As datas do seed giram em torno de **2026-03-16**: para ver follow-ups vencidos e a vencer como nos exemplos abaixo, peça ao agente para usar essa data de referência.
+O comando cria o banco, carrega os dados e encerra. Se o banco já tiver dados, ele recusa e não altera nada; se o caminho não puder ser usado (um diretório no lugar do arquivo, falta de permissão), ele mostra uma mensagem curta e termina com código de saída 1. As datas do seed giram em torno de **2026-03-16**: para ver follow-ups vencidos e a vencer como nos exemplos abaixo, peça ao agente para usar essa data de referência.
 
 Para usar com os seus dados, aponte `JOB_SEARCH_DB` para outro arquivo e não rode o `--seed`: o banco é criado vazio na primeira chamada.
 
@@ -113,6 +129,12 @@ Pela linha de comando:
 
 ```bash
 claude mcp add --env JOB_SEARCH_DB=/caminho/absoluto/para/job_search_demo.db --transport stdio job-search -- /caminho/absoluto/para/job-search-mcp/.venv/bin/job-search-mcp
+```
+
+No Windows (PowerShell), o mesmo comando com os caminhos do Windows:
+
+```powershell
+claude mcp add --env JOB_SEARCH_DB=C:\caminho\absoluto\para\job_search_demo.db --transport stdio job-search -- C:\caminho\absoluto\para\job-search-mcp\.venv\Scripts\job-search-mcp.exe
 ```
 
 Ou em um arquivo `.mcp.json` na raiz do projeto em que você usa o Claude Code:
@@ -152,7 +174,7 @@ Abra as configurações do aplicativo, vá em **Developer** e clique em **Edit C
 }
 ```
 
-No Windows, nos dois clientes, o comando é o executável em `.venv\Scripts`, e as barras invertidas são dobradas dentro do JSON:
+No Windows, nos arquivos JSON dos dois clientes, o comando é o executável em `.venv\Scripts`, e as barras invertidas são dobradas:
 
 ```json
 {
@@ -231,6 +253,14 @@ O repositório é público e **não contém dados reais**. Os dados de demonstra
 
 As ferramentas não acessam a rede, não executam comandos e só leem e gravam no banco configurado.
 
+## Limitações conhecidas
+
+- **"Hoje" e `created_at` usam relógios diferentes.** O "hoje" das ferramentas (padrão das datas e limite para data futura) é a data local da máquina em que o servidor roda; `created_at` é gravado pelo SQLite em UTC. Perto da meia-noite, a data de criação de uma vaga pode cair em um dia diferente do "hoje" local.
+- **`track` e `score` são validados só no cadastro** (`add_job`). Os filtros de `list_jobs` aceitam qualquer valor, e linhas que já estejam no banco ou que entrem por outro caminho não são conferidas.
+- **Sistemas testados:** Windows 11, à mão e pela suíte; Ubuntu, pela suíte no CI. macOS não foi testado.
+- **O caminho padrão do banco** (`data/local/job_search.db`) é calculado a partir do diretório do código e pressupõe instalação em modo editável a partir do clone, como descrito acima. Com outra forma de instalação, defina `JOB_SEARCH_DB`.
+- A verificação em uma conversa real no Claude Code ou no Claude Desktop ainda está pendente (ver o estado no início).
+
 ## Como rodar os testes
 
 Com o ambiente virtual ativo, instale as dependências de desenvolvimento e rode a validação completa:
@@ -247,7 +277,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Os testes usam bancos em diretórios temporários e não acessam a rede. Um deles sobe o servidor como subprocesso e conversa com ele por stdio.
+Os testes usam bancos em diretórios temporários e não acessam a rede. Dois deles sobem o servidor como subprocesso e conversam com ele por stdio: um por `python -m job_search_mcp.server` e outro pelo executável instalado `job-search-mcp`.
 
 ## Como o projeto é desenvolvido
 
