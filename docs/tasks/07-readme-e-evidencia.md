@@ -68,6 +68,10 @@ Conferidos na documentação em 2026-10-10:
 
 **Não foi verificado:** os blocos de configuração do README não foram executados em nenhum dos dois aplicativos. O formato vem da documentação; o comando e a variável vêm da verificação por stdio.
 
+### CI do pull request
+
+Pull request #9 (commit `9e2f7e8`): `gh pr checks 9` devolveu `validate pass 24s`. O commit que registra esta linha dispara uma nova execução, conferida no relatório de passagem.
+
 ### Limitações e pendências
 
 - **A verificação dos casos de uso foi feita por um cliente MCP programático via stdio, e não por uma pessoa conversando com um agente no Claude Code ou no Claude Desktop.** O objetivo da tarefa fala em "verificação manual"; essa parte fica pendente para o responsável humano, com os passos na evidência. Por isso o arquivo de evidência se chama `verificacao-dos-casos-de-uso`, e não `verificacao-manual`.
