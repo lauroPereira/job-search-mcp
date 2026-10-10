@@ -124,6 +124,10 @@ São os mesmos valores da tabela da tarefa 05. A suíte também tem um teste que
 - Erros de negócio estruturados: `test_duplicate_url_arrives_as_a_structured_error`, `test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones`, `test_update_job_rejects_future_and_invalid_dates`, `test_log_interaction_rejects_future_and_invalid_dates` e `test_pending_followups_rejects_negative_days_ahead_and_invalid_date`.
 - Demais regras da borda: `test_update_job_writes_history_dated_today`, `test_update_job_does_not_expose_reference_date`, `test_pending_followups_defaults_to_today_and_two_days_ahead`, `test_log_interaction_updates_the_contact_and_the_linked_job`, `test_add_job_then_list_jobs`, `test_list_contacts_filters_by_status_and_company`, `test_tools_create_the_schema_in_a_new_database` e `test_tools_close_the_connection_even_when_the_domain_fails`.
 
+### CI do pull request
+
+Pull request #8 (commit `3bcfac0`): `gh pr checks 8` devolveu `validate pass 27s`.
+
 ### Limitações
 
 - A verificação por stdio foi feita por um cliente MCP programático (o `Client` do fastmcp), e não por uma pessoa usando o Claude Code ou o Claude Desktop.
