@@ -33,10 +33,13 @@ venv/
 Thumbs.db
 
 # Dados reais do usuário: nunca versionar (o repositório é público)
-data/*.db
-data/*.sqlite
-data/*.sqlite3
+*.db
+*.sqlite
+*.sqlite3
 data/local/
 *.xlsx
+*.xls
+*.xlsm
+*.ods
 *.csv
 !data/seed/*.csv
