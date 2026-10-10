@@ -3,6 +3,7 @@
 import csv
 import os
 import sqlite3
+from datetime import date
 from pathlib import Path
 
 DB_ENV_VAR = "JOB_SEARCH_DB"
@@ -82,6 +83,16 @@ CREATE TABLE IF NOT EXISTS job_history (
     source TEXT NOT NULL
 );
 """
+
+
+def to_date(value: str | date | None) -> date | None:
+    """Convert a stored ISO 8601 text (YYYY-MM-DD) into a date; the single conversion point.
+
+    Dates pass through unchanged and None stays None. Invalid text raises ValueError.
+    """
+    if value is None or isinstance(value, date):
+        return value
+    return date.fromisoformat(value)
 
 
 def default_db_path() -> Path:
