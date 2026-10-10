@@ -10,7 +10,7 @@ Criar o esqueleto do pacote, com pytest e ruff rodando em um projeto ainda sem f
 
 ## Pré-condições
 
-- Decisão 0001 aceita pelo autor.
+- Decisão 0001 aceita pelo autor (feito em 2026-10-10).
 - Python 3.12 disponível.
 
 ## Arquivos prováveis

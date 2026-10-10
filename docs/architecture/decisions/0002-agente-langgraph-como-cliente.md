@@ -7,10 +7,10 @@ Construir, em uma segunda fase, um agente em LangGraph que consome o servidor MC
 ## Status
 
 ```text
-proposta
+aceita
 ```
 
-Proposta em 2026-10-10. Depende da confirmação do autor e da conclusão do MVP (tarefas 01 a 07).
+Proposta e aceita pelo autor em 2026-10-10. A execução depende da conclusão do MVP (tarefas 01 a 07).
 
 ## Contexto
 

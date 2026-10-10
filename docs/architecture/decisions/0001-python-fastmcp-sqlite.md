@@ -7,10 +7,10 @@ Usar Python 3.12 com o SDK oficial de MCP (FastMCP) e SQLite como armazenamento.
 ## Status
 
 ```text
-proposta
+aceita
 ```
 
-Proposta em 2026-10-10 na preparação do projeto. Passa a "aceita" quando o autor confirmar, antes da tarefa 01.
+Proposta e aceita pelo autor em 2026-10-10.
 
 ## Contexto
 
