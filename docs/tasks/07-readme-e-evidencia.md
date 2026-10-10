@@ -110,6 +110,8 @@ Conferido em 2026-10-10 com `git ls-tree origin/main`: `main` ainda não tem `sr
 
 Pull request #9 (commit `9e2f7e8`): `gh pr checks 9` devolveu `validate pass 24s`. O commit que registra esta linha dispara uma nova execução, conferida no relatório de passagem.
 
+Depois das correções da revisão (commit `a33306f`): `gh pr checks 9` devolveu `validate pass 26s`; no log da execução, em Ubuntu, `151 passed`. O commit que registra este parágrafo só altera este arquivo e dispara mais uma execução, conferida no relatório de passagem.
+
 ### Limitações e pendências
 
 - **A verificação dos casos de uso foi feita por um cliente MCP programático via stdio, e não por uma pessoa conversando com um agente no Claude Code ou no Claude Desktop.** O objetivo da tarefa fala em "verificação manual"; essa parte fica pendente para o responsável humano, com os passos na evidência. Por isso o arquivo de evidência se chama `verificacao-dos-casos-de-uso`, e não `verificacao-manual`.
