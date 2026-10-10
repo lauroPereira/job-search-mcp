@@ -98,6 +98,44 @@ def test_add_job_requires_company_title_and_url(connection):
     assert count(connection, "job") == 15
 
 
+def test_add_job_accepts_every_track_and_the_score_limits(connection):
+    for number, track in enumerate(domain.JOB_TRACKS):
+        job = jobs.add_job(connection, "Empresa Exemplo", "Cargo", f"{NEW_URL}/{track}", track)
+        assert job["track"] == track
+        assert job["id"] == 16 + number
+    for score in (0, 10, 0.0, 10.0, 7.5):
+        url = f"{NEW_URL}/{score!r}"
+        job = jobs.add_job(connection, "Empresa Exemplo", "Cargo", url, score=score)
+        assert job["score"] == score
+    without = jobs.add_job(connection, "Empresa Exemplo", "Cargo", f"{NEW_URL}/none")
+    assert without["track"] is None
+    assert without["score"] is None
+
+
+@pytest.mark.parametrize("track", ["dados", "Data", "", " data", "backend"])
+def test_add_job_with_invalid_track_returns_error_and_creates_nothing(connection, track):
+    result = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", NEW_URL, track=track)
+    assert result["error"] == "invalid_input"
+    assert "track" in result["detail"]
+    assert result["valid_tracks"] == ["data", "systems", "product", "ai", "other"]
+    assert count(connection, "job") == 15
+
+
+@pytest.mark.parametrize("score", [-0.1, 10.1, 11, -1, float("nan"), float("inf"), True, "8"])
+def test_add_job_with_invalid_score_returns_error_and_creates_nothing(connection, score):
+    result = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", NEW_URL, score=score)
+    assert result["error"] == "invalid_input"
+    assert "score" in result["detail"]
+    assert "0 to 10" in result["detail"]
+    assert count(connection, "job") == 15
+
+
+def test_seed_jobs_respect_the_track_and_score_rules(connection):
+    for job in jobs.list_jobs(connection):
+        assert job["track"] in domain.JOB_TRACKS
+        assert domain.is_valid_score(job["score"])
+
+
 def test_update_job_status_generates_history_with_old_and_new_value(connection, reference_date):
     result = jobs.update_job(
         connection, 8, source="usuário", reference_date=reference_date, status="applied"

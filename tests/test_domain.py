@@ -110,6 +110,39 @@ def test_invalid_status_error_lists_the_valid_statuses():
         assert status in result["detail"]
 
 
+def test_tracks_and_score_range_match_the_plan():
+    assert domain.JOB_TRACKS == ("data", "systems", "product", "ai", "other")
+    assert (domain.SCORE_MIN, domain.SCORE_MAX) == (0, 10)
+
+
+@pytest.mark.parametrize(
+    ("score", "expected"),
+    [
+        (0, True),
+        (10, True),
+        (9.5, True),
+        (-0.01, False),
+        (10.01, False),
+        (float("nan"), False),
+        (True, False),
+        ("9", False),
+        (None, False),
+    ],
+)
+def test_is_valid_score(score, expected):
+    assert domain.is_valid_score(score) is expected
+
+
+def test_invalid_track_and_score_errors_are_invalid_input():
+    track = domain.invalid_track("dados")
+    assert track["error"] == "invalid_input"
+    assert "'dados'" in track["detail"]
+    assert track["valid_tracks"] == list(domain.JOB_TRACKS)
+    score = domain.invalid_score(11)
+    assert score["error"] == "invalid_input"
+    assert "'11'" in score["detail"]
+
+
 def test_domain_modules_do_not_read_the_current_date():
     """No domain module calls the clock: the reference date always comes in as a parameter."""
     source_dir = Path(domain.__file__).parent

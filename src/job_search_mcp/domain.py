@@ -37,6 +37,11 @@ CONTACT_STATUSES = (
 CONTACT_CLOSED_STATUSES = frozenset({"closed"})
 CONTACT_NO_FOLLOW_UP_STATUSES = frozenset({"to_contact", "closed"})
 
+# Career tracks and the fit score range a job may be registered with.
+JOB_TRACKS = ("data", "systems", "product", "ai", "other")
+SCORE_MIN = 0
+SCORE_MAX = 10
+
 JOB_FOLLOW_UP_DAYS = 7
 CONTACT_FOLLOW_UP_DAYS = 6
 
@@ -74,6 +79,28 @@ def not_found(kind: str, record_id) -> dict:
 
 def invalid_date(field: str, value) -> dict:
     return error("invalid_date", f"Invalid {field} '{value}'. Use the ISO format YYYY-MM-DD.")
+
+
+def invalid_track(track) -> dict:
+    return error(
+        "invalid_input",
+        f"Invalid track '{track}'. Valid tracks: {', '.join(JOB_TRACKS)}.",
+        valid_tracks=list(JOB_TRACKS),
+    )
+
+
+def invalid_score(score) -> dict:
+    return error(
+        "invalid_input",
+        f"Invalid score '{score}'. Use a number from {SCORE_MIN} to {SCORE_MAX}.",
+    )
+
+
+def is_valid_score(score) -> bool:
+    """A score is a number (not a boolean, not NaN) from SCORE_MIN to SCORE_MAX."""
+    if isinstance(score, bool) or not isinstance(score, (int, float)):
+        return False
+    return SCORE_MIN <= score <= SCORE_MAX
 
 
 def job_follow_up(

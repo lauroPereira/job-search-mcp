@@ -57,10 +57,19 @@ def add_job(
     score: float | None = None,
     next_step: str | None = None,
 ) -> dict:
-    """Register a job in the initial status, refusing a URL that is already registered."""
+    """Register a job in the initial status, refusing a URL that is already registered.
+
+    `track`, when informed, must be one of domain.JOB_TRACKS and `score` a number from
+    domain.SCORE_MIN to domain.SCORE_MAX; otherwise nothing is created and the result is
+    the error 'invalid_input'.
+    """
     for field, value in (("company", company), ("title", title), ("url", url)):
         if not value or not value.strip():
             return domain.error("invalid_input", f"Field '{field}' is required.")
+    if track is not None and track not in domain.JOB_TRACKS:
+        return domain.invalid_track(track)
+    if score is not None and not domain.is_valid_score(score):
+        return domain.invalid_score(score)
     url = url.strip()
     existing = connection.execute("SELECT * FROM job WHERE url = ?", (url,)).fetchone()
     if existing:
