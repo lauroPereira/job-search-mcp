@@ -27,7 +27,7 @@ Detalhes em [`docs/specs/servidor-mcp-busca-de-emprego.md`](docs/specs/servidor-
 ## Tecnologia
 
 - Python 3.12
-- SDK oficial de MCP para Python (FastMCP), transporte stdio
+- Pacote `fastmcp`, transporte stdio ([decisão 0003](docs/architecture/decisions/0003-usar-pacote-fastmcp.md))
 - SQLite pela biblioteca padrão
 - pytest e ruff
 

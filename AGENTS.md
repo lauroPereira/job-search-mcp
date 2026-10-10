@@ -161,7 +161,7 @@ Antes de concluir uma tarefa, confirme que os caminhos citados existem, que a do
 
 - **Nome:** job-search-mcp.
 - **Objetivo:** servidor MCP que dá a um agente de IA ferramentas para gerir uma busca de emprego: vagas, contatos de networking, follow-ups e um resumo do dia.
-- **Stack decidida:** Python 3.12, SDK oficial de MCP para Python (FastMCP), SQLite pela biblioteca padrão, pytest e ruff. Decisões em `docs/architecture/decisions/`.
+- **Stack decidida:** Python 3.12, pacote fastmcp (decisão 0003), SQLite pela biblioteca padrão, pytest e ruff. Decisões em `docs/architecture/decisions/`.
 - **Convenção de idioma:** código, nomes de ferramentas, parâmetros, tabelas, campos e valores de status em inglês; documentação e mensagens de commit em português.
 - **Fluxo:** SDD. A especificação está em `docs/specs/`, o plano em `docs/specs/` (arquivo `-plano`) e as tarefas em `docs/tasks/`. Implemente uma tarefa por vez, na ordem numérica.
 
