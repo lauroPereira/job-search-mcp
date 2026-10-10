@@ -72,6 +72,27 @@ Desvios e decisões:
 - Ressalva sobre a data atual: `created_at` de uma vaga nova continua vindo do padrão `CURRENT_TIMESTAMP` do esquema (tarefa 02). Nenhuma função Python lê o relógio, mas o banco carimba a criação; `created_at` não participa de nenhuma regra.
 - Ajustes de documentação pedidos pelo responsável, incluídos neste pull request: no plano, `url` passou a "texto, único, obrigatório" e o item "Privacidade" saiu da estratégia de testes; na especificação, o critério de aceitação de privacidade foi reescrito.
 
+### Correções da revisão (pull request #5)
+
+Executadas em 2026-10-10, no mesmo ambiente, em um commit novo sobre a branch da tarefa.
+
+| Comando | Resultado observado |
+|---|---|
+| `python -m pytest` | `69 passed` (14 em `tests/test_db.py`, 29 em `tests/test_domain.py`, 25 em `tests/test_jobs.py`, 1 em `tests/test_smoke.py`; código 0) |
+| `python -m ruff check .` | `All checks passed!` (código 0) |
+| `python tools/scripts/lint_and_tests.py --strict` | pytest `69 passed`, ruff `All checks passed!`, `Skills válidas.`, `Validação estrita concluída sem falhas.` (código 0) |
+| `python -m pytest` com os testes novos e o código de antes da correção | `7 failed, 62 passed`: os testes novos falham sem as correções |
+
+O que mudou:
+
+- `db.to_date` trata `datetime` antes de `date` e devolve só a data (`datetime` é subclasse de `date` e passava direto, sendo gravado com hora, o que quebrava as leituras seguintes). Teste: `test_update_job_with_datetime_stores_only_the_date_and_keeps_listing_working` (o banco guarda `2026-03-03` e `2026-03-16`, e `list_jobs` segue devolvendo as 15 vagas com o follow-up calculado).
+- `update_job` captura `TypeError` além de `ValueError` na conversão de datas: um inteiro em `applied_on` devolve `invalid_date` sem alterar a vaga (`test_update_job_with_non_text_date_returns_error_and_changes_nothing`).
+- `update_job` converte `reference_date` com `to_date`: aceita `date`, `datetime` ou texto ISO; valor ausente ou inválido devolve `invalid_date` sem alterar a vaga (`test_update_job_accepts_reference_date_as_iso_text_or_datetime` e `test_update_job_with_invalid_reference_date_returns_error_and_changes_nothing`).
+- Quando o status muda para `applied` e a vaga não tem `applied_on` (nem gravado nem informado na chamada), `update_job` preenche `applied_on` com `reference_date` e grava a linha de histórico correspondente. Sem isso a vaga ficava sem follow-up e sumia do acompanhamento. Testes: `test_update_job_to_applied_without_application_date_fills_it_with_the_reference_date`, `test_update_job_to_applied_keeps_the_informed_application_date`, `test_update_job_to_applied_keeps_the_stored_application_date` e `test_update_job_to_another_status_does_not_fill_the_application_date`. A regra só vale na mudança de status: vaga que já está em `applied` sem data não é preenchida por uma chamada que repete o status.
+- Por causa dessa regra, `test_update_job_status_generates_history_with_old_and_new_value` passou a esperar duas linhas de histórico (status e `applied_on`) para a vaga 8, que não tinha data de candidatura.
+- `apply_job_changes` só grava os campos da constante `jobs.JOB_UPDATABLE_FIELDS` (`status`, `next_step`, `applied_on`, `last_contact_on`), já que o nome da coluna entra no texto do UPDATE; outro nome levanta `ValueError` antes de qualquer gravação (`test_apply_job_changes_refuses_a_field_outside_the_allowed_list`). É erro de programação, não de negócio, por isso é exceção e não resposta estruturada.
+- No plano, tabela de ferramentas: `daily_summary` ganhou `deadline?`; ficou registrado que vaga nova entra em `suggested`, que `update_job` preenche `applied_on` ao mudar para `applied` e que "contatos ativos" são os que não estão em `closed`.
+
 ## Status
 
 ```text

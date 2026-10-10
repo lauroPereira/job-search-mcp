@@ -7,6 +7,9 @@ from job_search_mcp import domain
 from job_search_mcp.db import to_date
 
 INITIAL_STATUS = "suggested"
+APPLIED_STATUS = "applied"
+# The only columns apply_job_changes may write: the column name goes into the UPDATE text.
+JOB_UPDATABLE_FIELDS = ("status", "next_step", "applied_on", "last_contact_on")
 
 
 def job_to_dict(row: sqlite3.Row) -> dict:
@@ -85,7 +88,11 @@ def apply_job_changes(
     """Write the fields that really change and one job_history line for each of them.
 
     Does not commit: the caller owns the transaction. Returns the history lines created.
+    A field outside JOB_UPDATABLE_FIELDS raises ValueError before anything is written.
     """
+    unknown = [field for field in changes if field not in JOB_UPDATABLE_FIELDS]
+    if unknown:
+        raise ValueError(f"Fields not allowed in a job update: {', '.join(unknown)}.")
     history = []
     for field, new_value in changes.items():
         old_value = job[field]
@@ -113,7 +120,7 @@ def update_job(
     connection: sqlite3.Connection,
     job_id: int,
     source: str,
-    reference_date: date,
+    reference_date: str | date,
     status: str | None = None,
     next_step: str | None = None,
     applied_on: str | date | None = None,
@@ -121,12 +128,21 @@ def update_job(
 ) -> dict:
     """Update the informed fields of a job and record each change in job_history.
 
-    `source` says where the change came from and `reference_date` is the date written in
-    the history. Fields left as None are not touched. Returns the updated job and the
-    history lines created, or a structured error without changing anything.
+    `source` says where the change came from and `reference_date` (a date or ISO text) is
+    the date written in the history. Fields left as None are not touched. When the status
+    changes to applied and the job has no application date, neither stored nor informed,
+    `applied_on` is filled with the reference date, so the job starts to have a follow-up.
+    Returns the updated job and the history lines created, or a structured error without
+    changing anything.
     """
     if not source or not source.strip():
         return domain.error("invalid_input", "Field 'source' is required.")
+    try:
+        changed_on = to_date(reference_date)
+    except (ValueError, TypeError):
+        changed_on = None
+    if changed_on is None:
+        return domain.invalid_date("reference_date", reference_date)
     job = get_job(connection, job_id)
     if job is None:
         return domain.not_found("job", job_id)
@@ -136,10 +152,13 @@ def update_job(
     for field, value in (("applied_on", applied_on), ("last_contact_on", last_contact_on)):
         try:
             parsed = to_date(value)
-        except ValueError:
+        except (ValueError, TypeError):
             return domain.invalid_date(field, value)
         changes[field] = parsed.isoformat() if parsed else None
+    becomes_applied = status == APPLIED_STATUS and job["status"] != APPLIED_STATUS
+    if becomes_applied and not job["applied_on"] and changes["applied_on"] is None:
+        changes["applied_on"] = changed_on.isoformat()
     changes = {field: value for field, value in changes.items() if value is not None}
     with connection:
-        history = apply_job_changes(connection, job, changes, source.strip(), reference_date)
+        history = apply_job_changes(connection, job, changes, source.strip(), changed_on)
     return {"job": get_job(connection, job_id), "history": history}

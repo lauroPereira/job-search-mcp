@@ -8,6 +8,9 @@ from job_search_mcp.db import to_date
 
 # Source written in job_history when an interaction moves the last contact date of a job.
 INTERACTION_SOURCE = "contact_interaction"
+# The first logged conversation takes a contact out of "to contact", so it gets a follow-up.
+NOT_CONTACTED_STATUS = "to_contact"
+FIRST_INTERACTION_STATUS = "awaiting_reply"
 
 
 def contact_to_dict(row: sqlite3.Row) -> dict:
@@ -55,7 +58,9 @@ def log_interaction(
     """Record an interaction with a contact and refresh its follow-up.
 
     Updates the last contact date of the contact and, when informed, its status and next
-    step. If the contact is linked to a job, the last contact date of the job is updated
+    step. A contact in to_contact logged without a status moves to awaiting_reply, so it
+    starts to have a follow-up; an informed status always prevails. If the contact is
+    linked to a job, the last contact date of the job is updated
     too, with a job_history line. A last contact date never moves backwards: logging an
     older interaction keeps the more recent date. Returns the updated contact, its new
     follow-up and the linked job (None when there is none), or a structured error without
@@ -74,6 +79,9 @@ def log_interaction(
         return domain.not_found("contact", contact_id)
     if status is not None and status not in domain.CONTACT_STATUSES:
         return domain.invalid_status(status, domain.CONTACT_STATUSES)
+
+    if status is None and contact["status"] == NOT_CONTACTED_STATUS:
+        status = FIRST_INTERACTION_STATUS
 
     interaction_on = interaction_date.isoformat()
     job = jobs.get_job(connection, contact["job_id"]) if contact["job_id"] else None

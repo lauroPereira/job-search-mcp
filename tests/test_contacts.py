@@ -164,3 +164,44 @@ def test_log_interaction_requires_summary_and_valid_date(connection, reference_d
     assert contacts.log_interaction(connection, 1, "Conversa", "16/03")["error"] == "invalid_date"
     assert contacts.log_interaction(connection, 1, "Conversa", None)["error"] == "invalid_date"
     assert count(connection, "interaction") == 0
+
+
+def test_log_interaction_without_status_moves_to_contact_to_awaiting_reply(
+    connection, reference_date
+):
+    before = contacts.get_contact(connection, 8)
+    assert before["status"] == "to_contact"
+    assert before["follow_up"] is None
+    result = contacts.log_interaction(connection, 8, "Primeira mensagem enviada", reference_date)
+    assert result["contact"]["status"] == "awaiting_reply"
+    assert result["contact"]["last_contact_on"] == "2026-03-16"
+    assert result["follow_up"] == "2026-03-22"  # interaction date plus 6 days
+    assert result["contact"]["follow_up"] == "2026-03-22"
+    assert result["contact"]["next_step"] == before["next_step"]  # not informed: kept
+    assert contacts.get_contact(connection, 8) == result["contact"]
+    assert [c["id"] for c in contacts.list_contacts(connection, status="to_contact")] == [5]
+
+
+def test_log_interaction_with_explicit_status_on_to_contact_keeps_the_informed_status(
+    connection, reference_date
+):
+    result = contacts.log_interaction(
+        connection, 8, "Conversa por telefone", reference_date, status="in_conversation"
+    )
+    assert result["contact"]["status"] == "in_conversation"
+    assert result["follow_up"] == "2026-03-22"
+    # Explicitly keeping to_contact is respected too: the contact stays without a follow-up.
+    kept = contacts.log_interaction(
+        connection, 5, "Tentativa sem resposta", reference_date, status="to_contact"
+    )
+    assert kept["contact"]["status"] == "to_contact"
+    assert kept["follow_up"] is None
+
+
+def test_log_interaction_without_status_keeps_the_status_of_other_contacts(
+    connection, reference_date
+):
+    # Only to_contact advances by itself; a closed contact stays closed.
+    result = contacts.log_interaction(connection, 6, "Mensagem de cortesia", reference_date)
+    assert result["contact"]["status"] == "closed"
+    assert result["follow_up"] is None
