@@ -1,4 +1,7 @@
 import json
+from datetime import date, datetime
+
+import pytest
 
 from job_search_mcp import domain, jobs
 
@@ -100,20 +103,75 @@ def test_update_job_status_generates_history_with_old_and_new_value(connection, 
         connection, 8, source="usuário", reference_date=reference_date, status="applied"
     )
     assert result["job"]["status"] == "applied"
-    assert result["history"] == [
-        {
-            "job_id": 8,
-            "date": "2026-03-16",
-            "field": "status",
-            "old_value": "to_apply",
-            "new_value": "applied",
-            "source": "usuário",
-        }
-    ]
+    assert result["history"][0] == {
+        "job_id": 8,
+        "date": "2026-03-16",
+        "field": "status",
+        "old_value": "to_apply",
+        "new_value": "applied",
+        "source": "usuário",
+    }
+    # Job 8 had no application date: becoming applied also fills applied_on (second line).
+    assert [line["field"] for line in result["history"]] == ["status", "applied_on"]
     stored = history_rows(connection, 8)
-    assert len(stored) == 1
-    assert {key: stored[0][key] for key in result["history"][0]} == result["history"][0]
+    assert len(stored) == 2
+    for line, stored_line in zip(result["history"], stored, strict=True):
+        assert {key: stored_line[key] for key in line} == line
     json.dumps(result)
+
+
+def test_update_job_to_applied_without_application_date_fills_it_with_the_reference_date(
+    connection, reference_date
+):
+    assert jobs.get_job(connection, 8)["applied_on"] is None
+    result = jobs.update_job(
+        connection, 8, source="usuário", reference_date=reference_date, status="applied"
+    )
+    assert result["job"]["applied_on"] == "2026-03-16"
+    assert result["job"]["follow_up"] == "2026-03-23"  # the job now has a follow-up
+    assert result["history"][1] == {
+        "job_id": 8,
+        "date": "2026-03-16",
+        "field": "applied_on",
+        "old_value": None,
+        "new_value": "2026-03-16",
+        "source": "usuário",
+    }
+    assert count(connection, "job_history") == 2
+
+
+def test_update_job_to_applied_keeps_the_informed_application_date(connection, reference_date):
+    result = jobs.update_job(
+        connection,
+        8,
+        source="usuário",
+        reference_date=reference_date,
+        status="applied",
+        applied_on="2026-03-12",
+    )
+    assert result["job"]["applied_on"] == "2026-03-12"
+    assert result["job"]["follow_up"] == "2026-03-19"
+    assert [line["field"] for line in result["history"]] == ["status", "applied_on"]
+    assert result["history"][1]["new_value"] == "2026-03-12"
+
+
+def test_update_job_to_applied_keeps_the_stored_application_date(connection, reference_date):
+    # Job 3 is in_review and already has an application date: going back to applied keeps it.
+    result = jobs.update_job(
+        connection, 3, source="usuário", reference_date=reference_date, status="applied"
+    )
+    assert result["job"]["applied_on"] == "2026-03-05"
+    assert [line["field"] for line in result["history"]] == ["status"]
+
+
+def test_update_job_to_another_status_does_not_fill_the_application_date(
+    connection, reference_date
+):
+    result = jobs.update_job(
+        connection, 8, source="usuário", reference_date=reference_date, status="blocked"
+    )
+    assert result["job"]["applied_on"] is None
+    assert [line["field"] for line in result["history"]] == ["status"]
 
 
 def test_update_job_records_one_history_line_per_changed_field(connection, reference_date):
@@ -205,3 +263,81 @@ def test_update_job_requires_source(connection, reference_date):
     )
     assert result["error"] == "invalid_input"
     assert jobs.get_job(connection, 8)["status"] == "to_apply"
+
+
+def test_update_job_with_datetime_stores_only_the_date_and_keeps_listing_working(
+    connection, reference_date
+):
+    result = jobs.update_job(
+        connection,
+        1,
+        source="usuário",
+        reference_date=reference_date,
+        applied_on=datetime(2026, 3, 3, 9, 15),
+        last_contact_on=datetime(2026, 3, 16, 14, 30, 59),
+    )
+    assert result["job"]["applied_on"] == "2026-03-03"
+    assert result["job"]["last_contact_on"] == "2026-03-16"
+    stored = connection.execute(
+        "SELECT applied_on, last_contact_on FROM job WHERE id = 1"
+    ).fetchone()
+    assert tuple(stored) == ("2026-03-03", "2026-03-16")
+    assert [line["new_value"] for line in result["history"]] == ["2026-03-03", "2026-03-16"]
+    listed = {job["id"]: job for job in jobs.list_jobs(connection)}
+    assert len(listed) == 15
+    assert listed[1]["follow_up"] == "2026-03-23"
+
+
+def test_update_job_with_non_text_date_returns_error_and_changes_nothing(
+    connection, reference_date
+):
+    before = jobs.get_job(connection, 8)
+    result = jobs.update_job(
+        connection,
+        8,
+        source="usuário",
+        reference_date=reference_date,
+        status="applied",
+        applied_on=20260316,
+    )
+    assert result["error"] == "invalid_date"
+    assert "applied_on" in result["detail"]
+    assert jobs.get_job(connection, 8) == before
+    assert count(connection, "job_history") == 0
+
+
+def test_update_job_accepts_reference_date_as_iso_text_or_datetime(connection):
+    as_text = jobs.update_job(
+        connection, 9, source="usuário", reference_date="2026-03-16", status="applied"
+    )
+    assert [line["date"] for line in as_text["history"]] == ["2026-03-16", "2026-03-16"]
+    assert as_text["job"]["applied_on"] == "2026-03-16"
+    as_datetime = jobs.update_job(
+        connection, 10, "usuário", datetime(2026, 3, 16, 8, 0), status="applied"
+    )
+    assert as_datetime["history"][0]["date"] == "2026-03-16"
+    assert as_datetime["job"]["applied_on"] == "2026-03-16"
+
+
+def test_update_job_with_invalid_reference_date_returns_error_and_changes_nothing(connection):
+    before = jobs.get_job(connection, 8)
+    for value in ("16/03/2026", None, 20260316):
+        result = jobs.update_job(
+            connection, 8, source="usuário", reference_date=value, status="applied"
+        )
+        assert result["error"] == "invalid_date"
+        assert "reference_date" in result["detail"]
+    assert jobs.get_job(connection, 8) == before
+    assert count(connection, "job_history") == 0
+
+
+def test_apply_job_changes_refuses_a_field_outside_the_allowed_list(connection):
+    job = jobs.get_job(connection, 1)
+    changes = {"status": "in_review", "company": "Outra Empresa"}
+    before = connection.total_changes
+    with pytest.raises(ValueError, match="company"):
+        jobs.apply_job_changes(connection, job, changes, "usuário", date(2026, 3, 16))
+    assert connection.total_changes == before  # failed before writing anything
+    assert jobs.get_job(connection, 1) == job
+    assert count(connection, "job_history") == 0
+    assert jobs.JOB_UPDATABLE_FIELDS == ("status", "next_step", "applied_on", "last_contact_on")
