@@ -75,6 +75,26 @@ Desvios e decisões:
 - As consultas não gravam nada no banco (`test_summary_does_not_write_to_the_database`).
 - O seed não precisou de ajuste.
 
+### Correções da revisão (pull request #7)
+
+Executadas em 2026-10-10, no mesmo ambiente, depois de trazer por merge as correções das tarefas 03 e 04 (pull requests #5 e #6).
+
+| Comando | Resultado observado |
+|---|---|
+| `python -m pytest` | `101 passed` (16 em `tests/test_contacts.py`, 14 em `tests/test_db.py`, 29 em `tests/test_domain.py`, 25 em `tests/test_jobs.py`, 1 em `tests/test_smoke.py`, 16 em `tests/test_summary.py`; código 0) |
+| `python -m ruff check .` | `All checks passed!` (código 0) |
+| `python tools/scripts/lint_and_tests.py --strict` | pytest `101 passed`, ruff `All checks passed!`, `Skills válidas.`, `Validação estrita concluída sem falhas.` (código 0) |
+| `python -m pytest tests/test_summary.py` sem a regra da nota nula na chave de ordenação (alteração temporária, desfeita) | `1 failed, 15 passed`: falha `test_application_queue_puts_score_zero_before_jobs_without_score` |
+| `python -m pytest tests/test_summary.py` com o desempate invertido (`-id`, alteração temporária, desfeita) | `1 failed, 15 passed`: falha `test_application_queue_breaks_score_ties_by_id` |
+
+O que mudou:
+
+- O teste `test_application_queue_puts_jobs_without_score_last` passava mesmo sem a regra "vaga sem nota vai para o fim", porque nota nula tratada como zero já ficava depois das notas positivas do seed. Teste novo: `test_application_queue_puts_score_zero_before_jobs_without_score` cria, no banco temporário, uma vaga sem nota e depois uma com nota 0 (id maior) e confere que a de nota 0 vem antes. Sem a regra, as duas empatariam em zero e o `id` poria a sem nota na frente.
+- Teste novo de empate: `test_application_queue_breaks_score_ties_by_id` (três vagas com nota 7.8, em status diferentes, e duas sem nota, sempre com o menor `id` primeiro). Limite deste teste: `list_jobs` já devolve por `id` e a ordenação do Python é estável, então ele não distingue "desempate explícito por `id`" de "sem desempate"; ele pega um desempate diferente (por exemplo, `id` decrescente).
+- As vagas desses testes são criadas dentro do próprio teste com `add_job`; `data/seed/` não foi alterado.
+- `daily_summary` deixou de ler vagas e contatos duas vezes: antes chamava `pending_followups` (que lê as duas listas) e depois `list_jobs` e `list_contacts` de novo; agora lê cada lista uma vez e reaproveita para contagens, pendências e fila. O retorno é o mesmo (os testes anteriores do resumo passam sem alteração) e a ordem de validação também: primeiro `reference_date`, depois `deadline`. Teste: `test_daily_summary_reads_jobs_and_contacts_only_once`. A janela padrão virou a constante `summary.DEFAULT_DAYS_AHEAD` (2).
+- Efeito das correções das tarefas anteriores nesta: nenhum teste do resumo precisou mudar. `test_job_that_gets_closed_leaves_the_pending_followups` usa `rejected`, que não aciona o preenchimento de `applied_on`.
+
 ## Status
 
 ```text
