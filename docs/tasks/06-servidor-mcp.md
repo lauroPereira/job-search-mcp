@@ -164,6 +164,8 @@ O teste antigo passava nas duas situações.
 
 Pull request #8 (commit `3bcfac0`): `gh pr checks 8` devolveu `validate pass 27s`.
 
+Depois das correções da revisão (commit `d3c4e70`): `gh pr checks 8` devolveu `validate pass 28s`. No log da execução, em Ubuntu: `151 passed in 7.64s`, nenhum teste pulado (o teste do executável instalado rodou também no CI), `All checks passed!` e `Validação estrita concluída sem falhas.`
+
 ### Limitações
 
 - A verificação por stdio foi feita por um cliente MCP programático (o `Client` do fastmcp), e não por uma pessoa usando o Claude Code ou o Claude Desktop.
