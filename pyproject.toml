@@ -13,6 +13,9 @@ dependencies = [
     "fastmcp==4.1.0",
 ]
 
+[project.scripts]
+job-search-mcp = "job_search_mcp.server:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
