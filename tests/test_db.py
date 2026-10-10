@@ -94,6 +94,37 @@ def test_duplicate_url_is_rejected(connection):
     assert count(connection, "job") == 15
 
 
+def test_job_without_url_is_rejected(connection):
+    with pytest.raises(sqlite3.IntegrityError):
+        connection.execute(
+            "INSERT INTO job (company, title, status) VALUES (?, ?, ?)",
+            ("Banco Aurora", "Data Engineer", "suggested"),
+        )
+    assert count(connection, "job") == 15
+
+
+def test_second_seed_load_fails_and_keeps_the_first_load(connection):
+    with pytest.raises(sqlite3.IntegrityError):
+        db.load_seed(connection)
+    assert count(connection, "job") == 15
+    assert count(connection, "contact") == 8
+
+
+def test_failed_seed_load_leaves_no_partial_data(tmp_path):
+    conn = db.connect(tmp_path / "conflict.db")
+    try:
+        db.create_schema(conn)
+        # A contact that collides with the seed makes the load fail after the jobs are inserted.
+        conn.execute("INSERT INTO contact (id, name, status) VALUES (1, 'Ana Exemplo', 'closed')")
+        conn.commit()
+        with pytest.raises(sqlite3.IntegrityError):
+            db.load_seed(conn)
+        assert count(conn, "job") == 0
+        assert count(conn, "contact") == 1
+    finally:
+        conn.close()
+
+
 def test_contact_with_unknown_job_is_rejected(connection):
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
@@ -108,9 +139,27 @@ def test_default_db_path_uses_environment_variable(monkeypatch, tmp_path):
     assert db.default_db_path() == custom
 
 
-def test_default_db_path_falls_back_to_local_data_directory(monkeypatch):
+def test_default_db_path_is_anchored_at_project_root(monkeypatch, tmp_path):
     monkeypatch.delenv("JOB_SEARCH_DB", raising=False)
-    assert db.default_db_path() == Path("data/local/job_search.db")
+    monkeypatch.chdir(tmp_path)  # the default must not depend on the working directory
+    path = db.default_db_path()
+    assert path.is_absolute()
+    assert path == db.PROJECT_ROOT / "data" / "local" / "job_search.db"
+    assert (db.PROJECT_ROOT / "pyproject.toml").is_file()
+    assert db.SEED_DIR == db.PROJECT_ROOT / "data" / "seed"
+    assert tmp_path.resolve() not in path.parents
+
+
+def test_connect_without_path_uses_environment_variable(monkeypatch, tmp_path):
+    custom = tmp_path / "from_env" / "job_search.db"
+    monkeypatch.setenv("JOB_SEARCH_DB", str(custom))
+    conn = db.connect()
+    try:
+        database_file = Path(conn.execute("PRAGMA database_list").fetchone()["file"])
+    finally:
+        conn.close()
+    assert database_file.resolve() == custom.resolve()
+    assert custom.is_file()
 
 
 def test_test_database_lives_in_temporary_directory(connection, tmp_path):

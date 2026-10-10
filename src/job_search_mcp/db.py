@@ -6,8 +6,10 @@ import sqlite3
 from pathlib import Path
 
 DB_ENV_VAR = "JOB_SEARCH_DB"
-DEFAULT_DB_PATH = Path("data/local/job_search.db")
-SEED_DIR = Path(__file__).resolve().parents[2] / "data" / "seed"
+# Project root (the directory that holds data/), so paths do not depend on the working directory.
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "local" / "job_search.db"
+SEED_DIR = PROJECT_ROOT / "data" / "seed"
 
 JOB_COLUMNS = (
     "id",
@@ -35,12 +37,13 @@ CONTACT_COLUMNS = (
 )
 
 # Dates are stored as ISO 8601 text (YYYY-MM-DD).
+# created_at is stored in UTC as "YYYY-MM-DD HH:MM:SS" (the format of CURRENT_TIMESTAMP).
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS job (
     id INTEGER PRIMARY KEY,
     company TEXT NOT NULL,
     title TEXT NOT NULL,
-    url TEXT UNIQUE,
+    url TEXT NOT NULL UNIQUE,
     track TEXT,
     score REAL,
     status TEXT NOT NULL,
@@ -82,7 +85,7 @@ CREATE TABLE IF NOT EXISTS job_history (
 
 
 def default_db_path() -> Path:
-    """Return the database path from JOB_SEARCH_DB, or the default local path."""
+    """Return the database path from JOB_SEARCH_DB, or data/local/ under the project root."""
     return Path(os.environ.get(DB_ENV_VAR) or DEFAULT_DB_PATH)
 
 
@@ -115,7 +118,12 @@ def _insert(connection: sqlite3.Connection, table: str, columns: tuple[str, ...]
 
 
 def load_seed(connection: sqlite3.Connection, seed_dir: Path = SEED_DIR) -> None:
-    """Insert the synthetic demo jobs and contacts from the seed CSV files."""
+    """Insert the synthetic demo jobs and contacts from the seed CSV files.
+
+    Meant for an empty database only: it is not idempotent. The seed rows carry fixed ids
+    and unique URLs, so a second load raises sqlite3.IntegrityError. Jobs and contacts are
+    inserted in a single transaction, so a failed load leaves no partial data behind.
+    """
     jobs = _read_csv(seed_dir / "jobs.csv", JOB_COLUMNS)
     contacts = _read_csv(seed_dir / "contacts.csv", CONTACT_COLUMNS)
     with connection:
