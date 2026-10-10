@@ -30,18 +30,54 @@ Criar o esquema do banco, a conexão e a carga de dados de demonstração sinté
 
 ## Critérios de conclusão
 
-- [ ] O banco é criado do zero por `create_schema` sem erro.
-- [ ] A carga do seed resulta nas contagens documentadas no teste.
-- [ ] Inserir um link repetido levanta erro de integridade.
-- [ ] Nenhum arquivo de banco aparece em `git status` depois dos testes.
-- [ ] Os CSV não contêm nomes de pessoas ou de empresas reais.
+- [x] O banco é criado do zero por `create_schema` sem erro.
+- [x] A carga do seed resulta nas contagens documentadas no teste.
+- [x] Inserir um link repetido levanta erro de integridade.
+- [x] Nenhum arquivo de banco aparece em `git status` depois dos testes.
+- [x] Os CSV não contêm nomes de pessoas ou de empresas reais.
 
 ## Validação
 
-A preencher na execução.
+Executada em 2026-10-10, no Windows 11, com Python 3.12.7 no ambiente virtual `.venv`.
+
+| Comando | Resultado observado |
+|---|---|
+| `python -m pytest` | `11 passed in 0.60s` (10 em `tests/test_db.py`, 1 em `tests/test_smoke.py`; código 0) |
+| `python -m ruff check .` | `All checks passed!` (código 0) |
+| `python tools/scripts/lint_and_tests.py --strict` | pytest `11 passed`, ruff `All checks passed!`, `Validação estrita concluída sem falhas.` (código 0) |
+| `git status --short -uall` depois dos testes | só os arquivos da tarefa; nenhum `.db` |
+| `find . -name "*.db" -o -name "*.sqlite*"` (fora de `.venv`) | nenhum arquivo encontrado |
+
+Como cada critério foi comprovado:
+
+- Esquema do zero: `test_create_schema_creates_the_four_tables`.
+- Contagens do seed: `test_seed_loads_expected_counts` (15 vagas, 8 contatos, 0 interações, 0 linhas de histórico, e a contagem por status).
+- Link repetido: `test_duplicate_url_is_rejected` (`sqlite3.IntegrityError`).
+- Banco fora do repositório: os testes usam `tmp_path`; `test_test_database_lives_in_temporary_directory` falha se o banco de teste não estiver em diretório temporário.
+- Dados fictícios: conferência manual dos CSV. As empresas são inventadas, os nomes de pessoas usam sobrenomes como "Exemplo", "Modelo" e "Teste", e os links usam o domínio reservado `example.com`. Não há teste automático para isso nesta tarefa (o plano prevê um teste de privacidade com lista fictícia), e os nomes inventados não foram comparados com cadastros de empresas existentes.
+
+Dados do seed para a data de referência fixa **2026-03-16** (fixture `reference_date`), segundo as regras da especificação (vaga: último contato ou candidatura mais 7 dias; contato: última interação mais 6 dias):
+
+| Follow-up em 2026-03-16 | Vagas (id) | Contatos (id) |
+|---|---|---|
+| Vencido | 1, 5 | 1, 4 |
+| A vencer em até 2 dias | 2, 3, 7 | 2, 7 |
+| Em dia | 4, 6 | 3 |
+| Sem follow-up (status não gera ou encerra) | 8 a 15 | 5, 6, 8 |
+
+A vaga 2 não tem último contato: o follow-up parte da data da candidatura. A classificação acima é a intenção do seed; as regras só serão implementadas e testadas nas tarefas 03 a 05.
+
+Desvios e decisões:
+
+- O seed tem 15 vagas, e não "cerca de 12": há 13 status de vaga, e foram mantidas duas vagas em `applied` (uma delas sem último contato) e duas em `to_apply` (para a ordenação da fila por nota).
+- `jobs.csv` traz a coluna `id`, para que `contacts.csv` aponte a vaga vinculada por `job_id`.
+- `connect(path)` cria o diretório do banco quando ele não existe (o padrão `data/local/` não é versionado) e, sem argumento, usa `default_db_path()`.
+- O caminho padrão é relativo ao diretório de trabalho; o plano não define outra base.
+- `load_seed` lê de `data/seed/` na raiz do repositório (funciona na instalação editável); empacotar os CSV fica para quando houver distribuição.
+- O esquema não tem `CHECK` para status: a lista fechada é validada no domínio (tarefa 03).
 
 ## Status
 
 ```text
-pendente
+concluída
 ```
