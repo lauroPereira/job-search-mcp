@@ -1,0 +1,76 @@
+<!-- Papel: registrar de qual versão do ai-dev-template este projeto foi criado e o que foi adaptado. -->
+
+# Origem do template
+
+- **Template:** ai-dev-template, versão 0.2.0.
+- **Commit-base:** `ad09c198a431b952e81ce7c665279d3ef1634e02`.
+- **Estado da fonte:** snapshot modificado. A cópia de trabalho do template tinha alterações locais não commitadas quando este projeto foi criado, então o commit sozinho não identifica a cópia; use os hashes abaixo.
+- **Data da criação:** 2026-10-10.
+- **Forma:** snapshot independente (sem submodule, subtree ou dependência do template).
+
+## O que foi copiado
+
+Instruções (`AGENTS.md`, `CLAUDE.md`), skills canônicas (`skills/`), modelos (`docs/templates/`), protocolo dos papéis (`docs/wiki/agents/`), READMEs estruturais de `docs/`, cenários de `evals/`, scripts de `tools/scripts/` e o workflow de validação em `.github/`.
+
+## O que foi omitido
+
+`.git`, `.claude/settings*.json`, `.obsidian/`, `.ruff_cache/`, `docs/raw/` (só o marcador vazio foi criado), `docs/evidence/` real do template, `docs/wiki/checklist-inicial.md`, `docs/wiki/politica-de-permissoes.md` e o README humano do template.
+
+## Adaptações
+
+- `README.md` escrito para este projeto.
+- `.agent-template.json`: descrição do projeto, caminhos próprios (`pyproject.toml`, `src`, `tests`, `data/seed`) e componentes opcionais reduzidos a SDD.
+- `.gitignore`: regras extras para nunca versionar dados reais (bancos, planilhas e CSV fora de `data/seed/`).
+- `AGENTS.md`: acrescentada a seção "Sobre este projeto", com objetivo, stack e regra de privacidade de dados. O restante foi mantido como no template.
+- SDD ativado: especificação, plano, tarefas e uma decisão arquitetural iniciais foram criados em `docs/`.
+
+## Hashes dos arquivos-fonte copiados
+
+| Arquivo | SHA-256 |
+|---|---|
+| `AGENTS.md` | `0c51916f69aff1d13525df2f047aa7c8a55180ce21f3da4a2fb9501d2f999505` |
+| `CLAUDE.md` | `041914a3429c4afe01f65dc490dcf00e2af0d2689f83ab8992ca006476e3a4bc` |
+| `docs/templates/candidato.md` | `0ef26098476a99c131d4465e86e6686216b4c8fcce67cffb9adc7ff40316192f` |
+| `docs/templates/decision-record.md` | `cb0d9ef4d42c4f018664e9f73e4fb9cd88b99c8c7164fa70de2495494471a2a5` |
+| `docs/templates/historia-de-uso.md` | `9afaf481e8695c4754728b2583d53a23fbddc9d29b128ffc53be37b3616eb143` |
+| `docs/templates/modelo-analise-tarefa.md` | `0da05711c3a4aa2aecf322280d9a1d4f9c91edc460c5b7729ab01568ff8c6bd1` |
+| `docs/templates/modelo-skill.md` | `678d2fbabc3806ce18a2c63919a36b249d3eec32c3cfa4c28ebe18a8d884b2ab` |
+| `docs/templates/modelo-workflow.md` | `ac9aa1c6bdcaeb0d72cb52e765de1ea06bb920f4ab6aaee1e2a6b527b71d4061` |
+| `docs/templates/passagem-de-papel.md` | `c82037e97999d3630494acc37876501ac741de672b9b57c32402b371c94ef85a` |
+| `docs/templates/plan.md` | `992a3c0a2af8ef7762d4fa5cbb1e3740bd976f7c1365c10cfe994627fe88efd0` |
+| `docs/templates/spec.md` | `7f93f1a0cb3c258563c74ca7824f0dcaf11385b3973bb766b3ee06a2d3466913` |
+| `docs/templates/task.md` | `8ec48a1ef137948a006451a6d87bb2e9a9b00c475f3e9891f4f998d99344a448` |
+| `docs/wiki/agents/README.md` | `ee4fa76397a85453a8e023d34db1a507de4a4440fa946ea92e7838d3c9d1fa78` |
+| `docs/wiki/agents/atualizacao-do-fluxo.md` | `44367c4e4580b8409f409753c554dc6f13e1bc13118d650b2cd5894f97da314f` |
+| `docs/wiki/agents/developer.md` | `5410608ca8c8fed12eb77b177f2d648a063358e12bdf3a8bdaa404ca3743cd3f` |
+| `docs/wiki/agents/qa.md` | `f6175f90ed621313324c4b84e9b4854d97ee21c66367602fa64247dea6ac58de` |
+| `docs/wiki/agents/reviewer.md` | `093cd481ca0aa9d136dae200bffc18db7d40463328fd0a299b9b0795db56e3b1` |
+| `docs/wiki/agents/supervisor.md` | `7cadae8c954c6ebb7d16082725450c2bba67c31ee9d94f0009899bc5cb90564d` |
+| `docs/wiki/agents/workflow.json` | `3971ac6ed0e16dfe9d4bc995895e5958828d8e5a3366e821a0d40c0ac8b22bec` |
+| `evals/expected/01-correcao-minima.md` | `d64a8b9f499dbdbc6d3aa232e4138e304e46956bb46d6a1440dbf55b11bb6705` |
+| `evals/expected/02-alteracao-contrato.md` | `a5669e62bf3b7ab2c221e218f3deba61940ce03cca77acf6dae00161abc4e454` |
+| `evals/expected/03-supervisor-entrada.md` | `9bacbbe9dfe2d88f760d9f525a17880dc63645905d713b3e60080e04c7d62752` |
+| `evals/expected/04-supervisor-continuidade.md` | `3293236c1f32178198acf6d39aa316a8c4e29df5f776b2d873622d472272be13` |
+| `evals/tasks/01-correcao-minima.md` | `c295be04255c0724a1f8262dcf6d859b5d1d40eb203cedae07faa00aca693da8` |
+| `evals/tasks/02-alteracao-contrato.md` | `c7d3e76cb7b32c1cb0efb024c2b6d71c14671c1cd0ca465727abcdd1c9b12b82` |
+| `evals/tasks/03-supervisor-entrada.md` | `82e594fe7cb46d52108fb2f12d84366cf2a51d5b9ea3b1fac22b26afd42d3958` |
+| `evals/tasks/04-supervisor-continuidade.md` | `a38e45d92506978664925fa2d1293d8672a84d0f3f07156a9b585140b1934263` |
+| `skills/developer/SKILL.md` | `bfa8b41ce709b11b05f99fea9b9122d6e67a8ef00abf9637bc2ff64e110ab265` |
+| `skills/project-bootstrap/SKILL.md` | `aca778e59a90842916e34caf0310d850e88eebf68e136e627689f2bfda7710b9` |
+| `skills/project-create/SKILL.md` | `9df97129be1ee77895482706bfc3e201ac6b937ce183d6810185f8f8220558c9` |
+| `skills/project-update/SKILL.md` | `672c29e4f1be2eb971945b31d224f80a08dcf0699fef3c027c64a8ba01aa4ea9` |
+| `skills/qa/SKILL.md` | `b42a9993f29c3e910beb792199652f924ef1dd166441cc4f228664584019644a` |
+| `skills/repository-code-review/SKILL.md` | `b6f42027e4c2cdea65e726bb31af942651f7f5866c565a4d3c9d724393ed8d9a` |
+| `skills/reviewer/SKILL.md` | `bd28e8faaa72344afed28093a30eb6f7ad3d5b9944faf3412ef85e8fddad757a` |
+| `skills/skill-creator/SKILL.md` | `27dc658f808092b5e65c351982a836f42a8891dcb86c11fab1a9d38d143eb0e8` |
+| `skills/supervisor/SKILL.md` | `decb21da9a253258973480ab6ed85e6c4e5f0714520d87813027a54e89c4ede5` |
+| `tools/scripts/lint_and_tests.py` | `0886ff86cbb18169538e1b376c9349ff0936daf9e83ab75b88465c1ae1d62e56` |
+| `tools/scripts/sync-skills.ps1` | `f4258c78d90cf5372af05cfa9a55049a830042a3ac23ec2c8b512a9f1b6f598f` |
+| `tools/scripts/validate-agent-flow.ps1` | `e500cec3a671f2fb29d25decd7f7db151bd854732150423c4f5e696df599a524` |
+| `tools/scripts/validate-project.ps1` | `09e351be86938b107760a355f8045c128c098b7753a3632ec6db873b1a70891c` |
+| `docs/specs/README.md` | `27da88e719be6f7b6fc92bb66c8d06312208ea0ac010324ae28bc4ff2f16e16b` |
+| `docs/tasks/README.md` | `112e496f80a308b794fc5768bf1a5d295ff31d6d082b6a20ebe630991d0ec27b` |
+| `docs/historias/README.md` | `0048e1ed9ee36e91cff313b710ddf952b5b9be9aa9095b219ba1820edfb7f6ca` |
+| `docs/evidence/README.md` | `c4703775b06e643e0609a58e814a159622f7039dbb54f05efb1d68709aff2065` |
+| `docs/architecture/README.md` | `935074cde24fcd0e586854fc1c323c7bf1dda45c4c62145aa91a8f68674564b2` |
+| `.github/workflows/validate.yml` | `854b147c859fa8addb9ece3342b3bc5ae001e32c7b771d562ec5e90766687557` |

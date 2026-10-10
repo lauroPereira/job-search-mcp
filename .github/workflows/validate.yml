@@ -1,0 +1,37 @@
+name: Validate template
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required files
+        run: |
+          test -f AGENTS.md
+          test -f CLAUDE.md
+          test -f README.md
+          test -d docs
+          test -d evals
+          test -d skills
+          test -d tools
+
+      - name: Validate skill files
+        shell: bash
+        run: |
+          set -e
+          for file in skills/*/SKILL.md; do
+            grep -q "^name:" "$file"
+            grep -q "^description:" "$file"
+          done

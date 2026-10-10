@@ -1,0 +1,41 @@
+# Segredos e configurações locais
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+*.secret
+
+# Configurações locais dos agentes (específicas da máquina)
+.claude/settings.local.json
+.codex/
+
+# Cache e temporários
+*.log
+*.tmp
+*.bak
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Configurações específicas do Obsidian
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/cache/
+.obsidian/plugins/*/data.json
+
+# Sistema operacional
+.DS_Store
+Thumbs.db
+
+# Dados reais do usuário: nunca versionar (o repositório é público)
+data/*.db
+data/*.sqlite
+data/*.sqlite3
+data/local/
+*.xlsx
+*.csv
+!data/seed/*.csv
