@@ -6,7 +6,7 @@
 
 ## Decisões técnicas
 
-- **Python 3.12 com o SDK oficial de MCP (FastMCP), transporte stdio.** É o caminho mais curto para expor ferramentas tipadas a clientes como Claude Code e Claude Desktop. Registrado em `docs/architecture/decisions/0001-python-fastmcp-sqlite.md`.
+- **Python 3.12 com o pacote fastmcp, transporte stdio.** É o caminho mais curto para expor ferramentas tipadas a clientes como Claude Code e Claude Desktop. Registrado em `docs/architecture/decisions/0001-python-fastmcp-sqlite.md` (Python, SQLite e stdio) e em `docs/architecture/decisions/0003-usar-pacote-fastmcp.md` (escolha do pacote `fastmcp` no lugar do SDK oficial).
 - **SQLite pela biblioteca padrão (`sqlite3`), sem ORM.** Um arquivo local, sem serviço, suficiente para o volume previsto. Mesma decisão 0001.
 - **Lógica de domínio separada do servidor.** As regras (status válidos, follow-up, histórico, resumo) ficam em funções Python puras, que recebem a conexão e a data de referência. O módulo do servidor só registra as ferramentas e converte entrada e saída. Isso permite testar tudo sem subir o servidor.
 - **Data de referência injetável.** Nenhuma regra chama a data atual por conta própria; a data entra como parâmetro, com padrão "hoje" apenas na borda (a ferramenta).
@@ -102,13 +102,14 @@ Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado,
 - **Unidade (domínio):** cálculo de follow-up de vaga e de contato, classificação por data de referência e validação de status. Cobre os critérios de follow-up e de status inválido.
 - **Unidade (vagas e contatos):** duplicidade de link, histórico gerado na atualização e interação que atualiza a vaga vinculada. Banco SQLite temporário por teste.
 - **Unidade (resumo):** com os dados sintéticos e data fixa, conferir contagens, vencidos, a vencer e a ordem da fila.
-- **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do SDK, para confirmar nomes, parâmetros e formato de retorno.
+- **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do pacote fastmcp (`from fastmcp import Client`), para confirmar nomes, parâmetros e formato de retorno, incluindo a saída estruturada (decisão 0003).
 - **Verificação manual:** conectar o servidor ao Claude Code por stdio e executar os cinco casos de uso da especificação; registrar o resultado em `docs/evidence/`.
 - **Privacidade:** um teste confere que os arquivos de `data/seed/` só usam empresas e nomes de uma lista fictícia.
 
 ## Riscos técnicos
 
-- **API do SDK de MCP diferente da esperada.** Mitigação: fixar a versão no `pyproject.toml` e consultar a documentação oficial antes da tarefa 05; a lógica não depende do SDK.
+- **API do pacote fastmcp diferente da esperada.** Mitigação: fixar a versão no `pyproject.toml` e consultar a documentação atual do fastmcp antes da tarefa 06; a lógica não depende do pacote. Ver a decisão 0003.
+- **Saída estruturada das ferramentas.** Em um teste com o SDK oficial, uma ferramenta com retorno `dict` chegou ao cliente só como texto. Mitigação: verificar na tarefa 06, com o fastmcp, o que o cliente recebe antes de fixar o formato de retorno (decisão 0003).
 - **Datas em texto no SQLite.** Mitigação: gravar sempre em ISO 8601 (AAAA-MM-DD) e converter em um único ponto (`db.py`).
 - **Banco real criado dentro do repositório por engano.** Mitigação: caminho padrão em `data/local/`, ignorado pelo Git, e teste que falha se o banco de teste não estiver em diretório temporário.
 - **Reversão:** projeto novo; reverter é descartar a branch da tarefa.
