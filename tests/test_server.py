@@ -1,7 +1,10 @@
 import asyncio
 import os
+import shutil
 import sqlite3
+import subprocess
 import sys
+import sysconfig
 from datetime import date
 from pathlib import Path
 
@@ -102,6 +105,22 @@ def test_tool_parameters_match_the_plan(db_path):
     assert days_ahead["default"] == 2
 
 
+def test_only_the_four_query_tools_carry_the_read_only_hint(db_path):
+    tools = {tool.name: tool for tool in run(lambda client: client.list_tools())}
+    read_only = {
+        name: getattr(tool.annotations, "read_only_hint", None) for name, tool in tools.items()
+    }
+    assert read_only == {
+        "list_jobs": True,
+        "list_contacts": True,
+        "pending_followups": True,
+        "daily_summary": True,
+        "add_job": None,
+        "update_job": None,
+        "log_interaction": None,
+    }
+
+
 def test_daily_summary_uses_today_and_returns_the_expected_object(db_path):
     result = structured("daily_summary")
     connection = db.connect(db_path)
@@ -173,6 +192,21 @@ def test_duplicate_url_arrives_as_a_structured_error(db_path):
     assert "id 1" in result["detail"]
     assert result["job"]["id"] == 1
     assert rows(db_path, "SELECT COUNT(*) FROM job") == [(15,)]
+
+
+def test_add_job_rejects_invalid_track_and_score_as_structured_errors(db_path):
+    job = {"company": "Empresa Exemplo", "title": "Data Engineer", "url": "https://example.com/v"}
+    track = structured("add_job", **job, track="dados")
+    assert track["error"] == "invalid_input"
+    assert "track" in track["detail"]
+    assert track["valid_tracks"] == ["data", "systems", "product", "ai", "other"]
+    for score in (-1, 10.5):
+        result = structured("add_job", **job, score=score)
+        assert result["error"] == "invalid_input"
+        assert "score" in result["detail"]
+    assert rows(db_path, "SELECT COUNT(*) FROM job") == [(15,)]
+    created = structured("add_job", **job, track="other", score=10)
+    assert (created["track"], created["score"]) == ("other", 10)
 
 
 def test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones(db_path):
@@ -278,25 +312,38 @@ def test_tools_create_the_schema_in_a_new_database(tmp_path, monkeypatch):
     assert structured("daily_summary", reference_date="2026-03-16")["active_contacts"] == 0
 
 
-def test_tools_close_the_connection_even_when_the_domain_fails(db_path, monkeypatch):
-    opened = []
-    original_connect = db.connect
+def test_tools_close_the_connection_on_success_business_error_and_exception(db_path, monkeypatch):
+    """Counts the real calls to close(): one for each connection a tool opens."""
+    opened, closed = [], []
+    original_connect = sqlite3.connect
 
-    def tracking_connect(*args, **kwargs):
-        opened.append(original_connect(*args, **kwargs))
+    class CountingConnection(sqlite3.Connection):
+        def close(self):
+            closed.append(self)
+            super().close()
+
+    def counting_connect(database, *args, **kwargs):
+        opened.append(original_connect(database, *args, factory=CountingConnection, **kwargs))
         return opened[-1]
 
     def failing(*args, **kwargs):
         raise RuntimeError("unexpected failure")
 
-    monkeypatch.setattr(db, "connect", tracking_connect)
-    assert structured("list_jobs")["jobs"]
-    monkeypatch.setattr(server.jobs, "list_jobs", failing)
-    assert call("list_jobs").is_error is True
-    assert len(opened) == 2
-    for connection in opened:
-        with pytest.raises(sqlite3.ProgrammingError):  # closed connections refuse to work
-            connection.execute("SELECT 1")
+    monkeypatch.setattr(db.sqlite3, "connect", counting_connect)
+
+    assert structured("list_jobs")["jobs"]  # success
+    assert (len(opened), len(closed)) == (1, 1)
+
+    assert structured("list_jobs", status="aplicada")["error"] == "invalid_status"  # business error
+    assert (len(opened), len(closed)) == (2, 2)
+
+    monkeypatch.setattr(server.jobs, "list_jobs", failing)  # unexpected exception in the domain
+    result = call("list_jobs")
+    assert result.is_error is True
+    assert "unexpected failure" in result.content[0].text
+    assert (len(opened), len(closed)) == (3, 3)
+
+    assert all(a is b for a, b in zip(opened, closed, strict=True))
 
 
 def test_nothing_is_written_outside_the_temporary_directory(db_path, tmp_path, monkeypatch):
@@ -334,6 +381,66 @@ def test_seed_option_loads_a_new_database_and_refuses_one_with_data(tmp_path, mo
     assert "already has data" in captured.err
     assert captured.out == ""
     assert rows(path, "SELECT COUNT(*) FROM job") == [(15,)]
+
+
+def test_seed_option_reports_an_unusable_path_without_a_traceback(tmp_path, monkeypatch, capsys):
+    a_file = tmp_path / "not_a_directory"
+    a_file.write_text("x", encoding="utf-8")
+    for path in (tmp_path, a_file / "demo.db"):  # a directory as the file; a file as the parent
+        monkeypatch.setenv(db.DB_ENV_VAR, str(path))
+        assert server.main(["--seed"]) == 1
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err.startswith("Could not load the demo data into")
+        assert len(captured.err.strip().splitlines()) == 1
+        assert db.DB_ENV_VAR in captured.err
+    assert sorted(item.name for item in tmp_path.iterdir()) == ["not_a_directory"]
+
+
+def installed_entry_point():
+    """The `job-search-mcp` executable of this environment, in the interpreter's scripts."""
+    executable = shutil.which("job-search-mcp", path=sysconfig.get_path("scripts"))
+    if executable is None:
+        pytest.skip("job-search-mcp is not installed in this environment (pip install -e .)")
+    return executable
+
+
+def test_installed_entry_point_seeds_and_serves(tmp_path):
+    """The executable declared in [project.scripts]: --seed, the error path and the server."""
+    executable = installed_entry_point()
+    path = tmp_path / "demo.db"
+
+    def seed(target):
+        return subprocess.run(
+            [executable, "--seed"],
+            env={**os.environ, db.DB_ENV_VAR: str(target)},
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+
+    loaded = seed(path)
+    assert (loaded.returncode, loaded.stdout) == (0, "")
+    assert "Demo data loaded" in loaded.stderr
+    unusable = seed(tmp_path)  # a directory in place of the database file
+    assert unusable.returncode == 1
+    assert "Could not load the demo data" in unusable.stderr
+    assert "Traceback" not in unusable.stderr
+
+    transport = StdioTransport(
+        command=executable, args=[], env={**os.environ, db.DB_ENV_VAR: str(path)}, keep_alive=False
+    )
+
+    async def session(client):
+        tools = await client.list_tools()
+        return tools, await client.call_tool("daily_summary", {"reference_date": "2026-03-16"})
+
+    tools, result = run(session, transport)
+    assert sorted(tool.name for tool in tools) == TOOL_NAMES
+    assert result.is_error is False
+    assert result.structured_content["active_contacts"] == 7
+    assert [job["id"] for job in result.structured_content["application_queue"]] == [8, 9, 10]
 
 
 def test_server_runs_over_stdio_as_a_subprocess(db_path):

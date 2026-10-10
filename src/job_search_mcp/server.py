@@ -7,6 +7,7 @@ business errors are plain objects, so the client receives them as structured con
 
 import argparse
 import datetime
+import sqlite3
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -110,6 +111,7 @@ def add_job(
 
     Returns the created job. If a job with the same url already exists, nothing is created
     and the result is the error 'duplicate_url', with the existing job in the key 'job'.
+    A track outside the valid ones or a score outside 0 to 10 is the error 'invalid_input'.
     """
     with open_database() as connection:
         return jobs.add_job(
@@ -281,7 +283,16 @@ def main(argv: list[str] | None = None) -> int:
     )
     arguments = parser.parse_args(argv)
     if arguments.seed:
-        refusal = seed_database()
+        try:
+            refusal = seed_database()
+        except (OSError, sqlite3.Error) as failure:
+            # Invalid path, a directory in place of the file, no permission: no traceback.
+            print(
+                f"Could not load the demo data into {db.default_db_path()}: {failure}. "
+                f"Check the path in {db.DB_ENV_VAR}.",
+                file=sys.stderr,
+            )
+            return 1
         if refusal:
             print(refusal, file=sys.stderr)
             return 1

@@ -122,11 +122,49 @@ São os mesmos valores da tabela da tarefa 05. A suíte também tem um teste que
 - `daily_summary` com data fixa: `test_daily_summary_uses_today_and_returns_the_expected_object` ("hoje" fixado em 2026-03-16; o conteúdo estruturado é igual ao retorno da função de domínio e aos números do seed) e `test_daily_summary_accepts_reference_date_and_deadline_as_iso_text`.
 - Sobe por `job-search-mcp` sem escrever fora do banco: verificação por stdio acima, `test_server_runs_over_stdio_as_a_subprocess`, `test_nothing_is_written_outside_the_temporary_directory` (seis chamadas, todas as conexões no arquivo do diretório temporário, que fica só com esse arquivo) e `test_seed_option_loads_a_new_database_and_refuses_one_with_data`.
 - Erros de negócio estruturados: `test_duplicate_url_arrives_as_a_structured_error`, `test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones`, `test_update_job_rejects_future_and_invalid_dates`, `test_log_interaction_rejects_future_and_invalid_dates` e `test_pending_followups_rejects_negative_days_ahead_and_invalid_date`.
-- Demais regras da borda: `test_update_job_writes_history_dated_today`, `test_update_job_does_not_expose_reference_date`, `test_pending_followups_defaults_to_today_and_two_days_ahead`, `test_log_interaction_updates_the_contact_and_the_linked_job`, `test_add_job_then_list_jobs`, `test_list_contacts_filters_by_status_and_company`, `test_tools_create_the_schema_in_a_new_database` e `test_tools_close_the_connection_even_when_the_domain_fails`.
+- Demais regras da borda: `test_update_job_writes_history_dated_today`, `test_update_job_does_not_expose_reference_date`, `test_pending_followups_defaults_to_today_and_two_days_ahead`, `test_log_interaction_updates_the_contact_and_the_linked_job`, `test_add_job_then_list_jobs`, `test_list_contacts_filters_by_status_and_company`, `test_tools_create_the_schema_in_a_new_database` e `test_tools_close_the_connection_on_success_business_error_and_exception` (reescrito na revisão; ver abaixo).
+
+### Correções da revisão do pull request #8
+
+Aplicadas em 2026-10-10, no mesmo ambiente, como commits novos na branch `feat/06-servidor-mcp`. A revisão não apontou defeito funcional; as ressalvas e o que foi feito:
+
+| Ressalva | Correção |
+|---|---|
+| O teste de fechamento de conexão passava mesmo sem o fechamento: a ferramenta roda em outra thread, e o erro esperado vinha da regra de thread do sqlite, não da conexão fechada. | Reescrito como `test_tools_close_the_connection_on_success_business_error_and_exception`: as conexões são abertas com uma subclasse de `sqlite3.Connection` (passada como `factory`) que registra cada chamada a `close()`. O teste confere, depois de cada chamada, que o número de conexões abertas e o de fechadas são iguais, em três caminhos: sucesso (`list_jobs`), erro de negócio (`list_jobs` com status inválido) e exceção inesperada no domínio (`RuntimeError`). |
+| `track` e `score` de `add_job` não eram validados. | Validação no domínio (`domain.JOB_TRACKS`, `domain.SCORE_MIN`, `domain.SCORE_MAX`, `domain.is_valid_score`, usados por `jobs.add_job`): `track` ausente ou um de `data`, `systems`, `product`, `ai`, `other`; `score` ausente ou número de 0 a 10 (limites incluídos; booleano, texto, NaN e infinito são recusados). Fora disso nada é criado e o retorno é o erro estruturado `invalid_input`; no caso de `track`, com a lista em `valid_tracks`. A validação vale só para o cadastro: `list_jobs` continua aceitando qualquer `track` e `min_score` como filtro. |
+| `--seed` terminava com traceback quando o caminho do banco não podia ser usado. | `main` trata `OSError` e `sqlite3.Error`: uma linha na saída de erro (`Could not load the demo data into <caminho>: <motivo>. Check the path in JOB_SEARCH_DB.`) e código de saída 1. |
+| Faltava teste do `readOnlyHint` e do executável instalado. | `test_only_the_four_query_tools_carry_the_read_only_hint` (as quatro ferramentas de consulta têm a anotação verdadeira; as três de escrita não têm anotação) e `test_installed_entry_point_seeds_and_serves` (roda o executável `job-search-mcp` do `[project.scripts]`: `--seed` em banco novo, `--seed` com um diretório no lugar do arquivo, e o servidor por stdio com uma chamada a `daily_summary`). |
+
+O seed foi conferido contra as novas faixas: as 15 vagas de `data/seed/jobs.csv` têm `track` entre os cinco valores e `score` de 5.0 a 9.5. A regra não precisou ser ajustada; `test_seed_jobs_respect_the_track_and_score_rules` mantém essa conferência na suíte.
+
+O executável é localizado de forma portátil por `shutil.which("job-search-mcp", path=sysconfig.get_path("scripts"))`, que resolve o diretório de scripts do ambiente em uso e a extensão `.exe` no Windows. Se o pacote não estiver instalado no ambiente, o teste é pulado com o motivo, em vez de falhar; no `.venv` local ele rodou (nenhum teste pulado).
+
+#### Prova de que o teste de fechamento falha sem o fechamento
+
+Duas mutações temporárias em `open_database()`, cada uma seguida de `python -m pytest -q tests/test_server.py` e desfeita em seguida (o arquivo foi restaurado a partir de uma cópia; `git diff` confirmou que só as mudanças desta correção ficaram):
+
+| Mutação | Resultado observado |
+|---|---|
+| `connection.close()` trocado por `pass` no `finally` | `1 failed, 23 passed`; falhou só o teste de fechamento, no caminho de sucesso: `assert (1, 0) == (1, 1)` |
+| `try`/`finally` removido (fecha só quando a ferramenta não levanta exceção) | `1 failed, 23 passed`; falhou só o teste de fechamento, no caminho da exceção: `assert (3, 2) == (3, 3)` |
+
+O teste antigo passava nas duas situações.
+
+#### Comandos e resultados depois das correções
+
+| Comando | Resultado observado |
+|---|---|
+| `python -m pytest` | `151 passed in 21.95s` (código 0): 121 anteriores, 15 novos em `tests/test_jobs.py`, 11 em `tests/test_domain.py` e 4 em `tests/test_server.py` (24 no total do arquivo; um teste foi reescrito) |
+| `python -m ruff check .` | `All checks passed!` (código 0) |
+| `python tools/scripts/lint_and_tests.py --strict` | pytest `151 passed`, ruff `All checks passed!`, `Skills válidas.`, `Validação estrita concluída sem falhas.` (código 0) |
+| `job-search-mcp --seed`, com `JOB_SEARCH_DB` apontando para um diretório existente | `Could not load the demo data into <diretório temporário>: unable to open database file. Check the path in JOB_SEARCH_DB.` (código 1, sem traceback) |
+| `job-search-mcp --seed`, com `JOB_SEARCH_DB` em um caminho cujo "diretório" pai é um arquivo | `Could not load the demo data into <diretório temporário>\afile\demo.db: [WinError 183] ...` (mensagem do sistema operacional, em uma linha; código 1, sem traceback) |
 
 ### CI do pull request
 
 Pull request #8 (commit `3bcfac0`): `gh pr checks 8` devolveu `validate pass 27s`.
+
+Depois das correções da revisão (commit `d3c4e70`): `gh pr checks 8` devolveu `validate pass 28s`. No log da execução, em Ubuntu: `151 passed in 7.64s`, nenhum teste pulado (o teste do executável instalado rodou também no CI), `All checks passed!` e `Validação estrita concluída sem falhas.`
 
 ### Limitações
 
