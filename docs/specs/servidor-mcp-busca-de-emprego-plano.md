@@ -48,7 +48,7 @@ tests/
 | id | inteiro, chave | |
 | company | texto, obrigatório | |
 | title | texto, obrigatório | |
-| url | texto, único | usado para evitar duplicidade |
+| url | texto, único, obrigatório | usado para evitar duplicidade |
 | track | texto | data, systems, product, ai, other |
 | score | real | 0 a 10 |
 | status | texto, obrigatório | lista fechada, ver abaixo |
@@ -104,7 +104,6 @@ Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado,
 - **Unidade (resumo):** com os dados sintéticos e data fixa, conferir contagens, vencidos, a vencer e a ordem da fila.
 - **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do pacote fastmcp (`from fastmcp import Client`), para confirmar nomes, parâmetros e formato de retorno, incluindo a saída estruturada (decisão 0003).
 - **Verificação manual:** conectar o servidor ao Claude Code por stdio e executar os cinco casos de uso da especificação; registrar o resultado em `docs/evidence/`.
-- **Privacidade:** um teste confere que os arquivos de `data/seed/` só usam empresas e nomes de uma lista fictícia.
 
 ## Riscos técnicos
 

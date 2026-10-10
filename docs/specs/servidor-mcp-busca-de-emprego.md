@@ -69,7 +69,7 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 - [ ] Toda chamada de `update_job` que muda o status gera uma linha de histórico com valor anterior e novo.
 - [ ] `daily_summary` devolve contagem por status, itens vencidos, itens a vencer e fila de candidatura ordenada por nota.
 - [ ] A suíte de testes roda sem acesso à rede e sem tocar em banco fora do diretório temporário de teste.
-- [ ] O repositório não contém nomes de pessoas, empresas em negociação nem valores reais; os dados em `data/seed/` são identificáveis como fictícios.
+- [ ] O repositório não contém dados reais de pessoas nem de processos seletivos; os dados em `data/seed/` são de demonstração.
 
 ## Riscos
 
