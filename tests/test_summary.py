@@ -150,3 +150,55 @@ def test_summary_does_not_write_to_the_database(connection, reference_date):
     summary.pending_followups(connection, reference_date)
     summary.daily_summary(connection, reference_date, deadline="2026-03-31")
     assert connection.total_changes == before
+
+
+def test_application_queue_puts_score_zero_before_jobs_without_score(connection, reference_date):
+    # The job without score is added first (lower id): if a missing score counted as zero,
+    # the tie would be broken by id and it would come before the job with score 0.
+    url = "https://vagas.example.com/empresa-exemplo/fila"
+    without_score = jobs.add_job(connection, "Empresa Exemplo", "Sem nota", f"{url}-sem-nota")
+    zero = jobs.add_job(connection, "Empresa Exemplo", "Nota zero", f"{url}-zero", score=0.0)
+    assert without_score["id"] < zero["id"]
+    assert without_score["score"] is None
+    assert zero["score"] == 0.0
+    queue = summary.daily_summary(connection, reference_date)["application_queue"]
+    assert ids(queue) == [8, 9, 10, zero["id"], without_score["id"]]
+    assert [job["score"] for job in queue] == [9.5, 7.8, 5.5, 0.0, None]
+
+
+def test_application_queue_breaks_score_ties_by_id(connection, reference_date):
+    url = "https://vagas.example.com/empresa-exemplo/empate"
+    first = jobs.add_job(connection, "Empresa Exemplo", "Empate A", f"{url}-a", score=7.8)
+    second = jobs.add_job(connection, "Empresa Exemplo", "Empate B", f"{url}-b", score=7.8)
+    no_score_a = jobs.add_job(connection, "Empresa Exemplo", "Sem nota A", f"{url}-sem-a")
+    no_score_b = jobs.add_job(connection, "Empresa Exemplo", "Sem nota B", f"{url}-sem-b")
+    # Seed job 9 has the same score; moving it to suggested mixes statuses in the tie.
+    jobs.update_job(connection, 9, "usuário", reference_date, status="suggested")
+    queue = summary.daily_summary(connection, reference_date)["application_queue"]
+    assert [(job["id"], job["score"]) for job in queue] == [
+        (8, 9.5),
+        (9, 7.8),  # three jobs with 7.8: lowest id first, whatever the status
+        (first["id"], 7.8),
+        (second["id"], 7.8),
+        (10, 5.5),
+        (no_score_a["id"], None),  # jobs without score also tie: lowest id first
+        (no_score_b["id"], None),
+    ]
+
+
+def test_daily_summary_reads_jobs_and_contacts_only_once(connection, reference_date, monkeypatch):
+    calls = {"jobs": 0, "contacts": 0}
+    original_jobs, original_contacts = summary.list_jobs, summary.list_contacts
+
+    def counting_jobs(*args, **kwargs):
+        calls["jobs"] += 1
+        return original_jobs(*args, **kwargs)
+
+    def counting_contacts(*args, **kwargs):
+        calls["contacts"] += 1
+        return original_contacts(*args, **kwargs)
+
+    monkeypatch.setattr(summary, "list_jobs", counting_jobs)
+    monkeypatch.setattr(summary, "list_contacts", counting_contacts)
+    summary.daily_summary(connection, reference_date)
+    assert calls == {"jobs": 1, "contacts": 1}

@@ -9,6 +9,15 @@ from job_search_mcp.db import to_date
 from job_search_mcp.jobs import list_jobs
 
 QUEUE_STATUSES = ("suggested", "to_apply")
+DEFAULT_DAYS_AHEAD = 2
+
+
+def _reference(reference_date: str | date | None) -> date | None:
+    """Convert the reference date, giving None when it is missing or invalid."""
+    try:
+        return to_date(reference_date)
+    except (ValueError, TypeError):
+        return None
 
 
 def _pending(records: list[dict], reference_date: date, days_ahead: int) -> list[dict]:
@@ -29,17 +38,14 @@ def _pending(records: list[dict], reference_date: date, days_ahead: int) -> list
 def pending_followups(
     connection: sqlite3.Connection,
     reference_date: str | date,
-    days_ahead: int = 2,
+    days_ahead: int = DEFAULT_DAYS_AHEAD,
 ) -> dict:
     """Jobs and contacts whose follow-up is overdue or due within `days_ahead` days.
 
     Each item is the job or contact plus `follow_up` and `state` (overdue or due_soon),
     ordered from the oldest follow-up to the most recent.
     """
-    try:
-        reference = to_date(reference_date)
-    except (ValueError, TypeError):
-        reference = None
+    reference = _reference(reference_date)
     if reference is None:
         return domain.invalid_date("reference_date", reference_date)
     return {
@@ -63,17 +69,21 @@ def daily_summary(
     deadline, `days_to_deadline` is the number of days from the reference date to it
     (negative when it has passed).
     """
-    pending = pending_followups(connection, reference_date)
-    if domain.is_error(pending):
-        return pending
+    reference = _reference(reference_date)
+    if reference is None:
+        return domain.invalid_date("reference_date", reference_date)
     try:
         deadline_date = to_date(deadline)
     except (ValueError, TypeError):
         return domain.invalid_date("deadline", deadline)
-    reference = to_date(pending["reference_date"])
 
+    # Jobs and contacts are read once and reused by the counts, the pending items and the queue.
     jobs = list_jobs(connection)
     contacts = list_contacts(connection)
+    pending = {
+        "jobs": _pending(jobs, reference, DEFAULT_DAYS_AHEAD),
+        "contacts": _pending(contacts, reference, DEFAULT_DAYS_AHEAD),
+    }
     queue = [job for job in jobs if job["status"] in QUEUE_STATUSES]
     queue.sort(key=lambda job: (job["score"] is None, -(job["score"] or 0), job["id"]))
 
@@ -84,7 +94,7 @@ def daily_summary(
         }
 
     return {
-        "reference_date": pending["reference_date"],
+        "reference_date": reference.isoformat(),
         "jobs_by_status": {
             status: sum(job["status"] == status for job in jobs) for status in domain.JOB_STATUSES
         },
