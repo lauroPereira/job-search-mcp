@@ -2,12 +2,12 @@
   "schema_version": "1.0",
   "kind": "declarative",
   "entrypoint": "../../../skills/supervisor/SKILL.md",
-  "default_profile": "main",
+  "default_profile": "develop",
   "cadence": "manual",
   "permissions_source": "AGENTS.md e autorização vigente da sessão",
   "profiles": {
     "main": {
-      "adoption": "padrão deste template",
+      "adoption": "padrão do template; não usado neste projeto",
       "base": "main",
       "work_branch": "codex/<assunto>",
       "review_target": "main",
@@ -15,12 +15,17 @@
       "intermediate_integration": false
     },
     "develop": {
-      "adoption": "opcional; adaptar e aprovar instruções do projeto antes de usar",
+      "adoption": "adotado neste projeto em 2026-10-10",
       "base": "develop",
-      "work_branch": "codex/<tarefa>-<assunto>",
+      "work_branch": "<tipo>/<tarefa>-<assunto>",
       "review_target": "develop",
       "final_branch": "main",
-      "intermediate_integration": true
+      "intermediate_integration": true,
+      "stages": {
+        "dev": "branch develop",
+        "hml": "branch main (pull request de develop)",
+        "prd": "tag v*.*.* em main"
+      }
     },
     "artifacts": {
       "adoption": "projeto sem Git; identificar versões por hash",

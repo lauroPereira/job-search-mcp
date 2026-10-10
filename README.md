@@ -47,6 +47,7 @@ especificação → plano → tarefas → implementação → validação
 
 - Especificação e plano: [`docs/specs/`](docs/specs/)
 - Tarefas, na ordem de execução: [`docs/tasks/`](docs/tasks/)
+- Estágios: `develop` (dev) → `main` (hml) → tag `v*.*.*` (prd); tudo entra por pull request
 - Instruções para agentes: [`AGENTS.md`](AGENTS.md) e [`CLAUDE.md`](CLAUDE.md)
 - Origem e versão do template: [`docs/wiki/origem-template.md`](docs/wiki/origem-template.md)
 
