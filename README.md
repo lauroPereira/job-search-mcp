@@ -14,13 +14,13 @@ Este servidor transforma aquele controle em ferramentas que qualquer cliente MCP
 
 | Ferramenta | O que faz |
 |---|---|
-| `listar_vagas` | Lista vagas, com filtro por status, trilha e nota mínima |
-| `registrar_vaga` | Inclui uma vaga nova, sem duplicar o link |
-| `atualizar_vaga` | Muda status, próximo passo e data do último contato, com histórico |
-| `listar_contatos` | Lista contatos de networking, com filtro por status e empresa |
-| `registrar_interacao` | Registra uma conversa com um contato e recalcula o follow-up |
-| `followups_pendentes` | Devolve vagas e contatos com follow-up vencido ou a vencer |
-| `resumo_do_dia` | Monta o resumo: números gerais, o que mudou e o que pede atenção |
+| `list_jobs` | Lista vagas, com filtro por status, trilha e nota mínima |
+| `add_job` | Inclui uma vaga nova, sem duplicar o link |
+| `update_job` | Muda status, próximo passo e data do último contato, com histórico |
+| `list_contacts` | Lista contatos de networking, com filtro por status e empresa |
+| `log_interaction` | Registra uma conversa com um contato e recalcula o follow-up |
+| `pending_followups` | Devolve vagas e contatos com follow-up vencido ou a vencer |
+| `daily_summary` | Monta o resumo: números gerais, o que mudou e o que pede atenção |
 
 Detalhes em [`docs/specs/servidor-mcp-busca-de-emprego.md`](docs/specs/servidor-mcp-busca-de-emprego.md).
 
@@ -61,9 +61,10 @@ No modo padrão o script valida a estrutura do projeto. Com `--strict`, também 
 ## Roteiro
 
 1. **MVP:** as sete ferramentas acima, com testes e dados sintéticos.
-2. **Importação:** carregar um controle existente a partir de CSV.
-3. **Painel:** uma tela de leitura em Streamlit sobre o mesmo banco.
+2. **Agente em LangGraph:** um agente que usa o servidor por MCP para montar o briefing diário, redigir follow-ups e pedir aprovação humana antes de registrar. Ver a [decisão 0002](docs/architecture/decisions/0002-agente-langgraph-como-cliente.md).
+3. **Importação:** carregar um controle existente a partir de CSV.
+4. **Painel:** uma tela de leitura em Streamlit sobre o mesmo banco.
 
 ## Licença
 
-A definir.
+[MIT](LICENSE).

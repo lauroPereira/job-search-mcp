@@ -30,7 +30,7 @@ Expor as sete operações como ferramentas MCP por stdio.
 ## Critérios de conclusão
 
 - [ ] O cliente de teste lista exatamente as sete ferramentas do plano.
-- [ ] Uma chamada a `resumo_do_dia` com data fixa devolve o objeto esperado.
+- [ ] Uma chamada a `daily_summary` com data fixa devolve o objeto esperado.
 - [ ] O servidor sobe por `job-search-mcp` sem erro e sem escrever fora do caminho do banco.
 - [ ] Erros de negócio chegam ao cliente como resposta estruturada.
 

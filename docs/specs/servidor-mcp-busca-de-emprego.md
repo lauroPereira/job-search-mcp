@@ -31,7 +31,7 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 
 ## Requisitos funcionais
 
-- O sistema deve expor as ferramentas `listar_vagas`, `registrar_vaga`, `atualizar_vaga`, `listar_contatos`, `registrar_interacao`, `followups_pendentes` e `resumo_do_dia`.
+- O sistema deve expor as ferramentas `list_jobs`, `add_job`, `update_job`, `list_contacts`, `log_interaction`, `pending_followups` e `daily_summary`.
 - O sistema deve recusar o cadastro de uma vaga cujo link já exista e informar qual é a vaga existente.
 - O sistema deve aceitar apenas status de uma lista fechada, para vagas e para contatos, e rejeitar valores fora dela com mensagem que liste os válidos.
 - O sistema deve calcular o follow-up de uma vaga como a data do último contato mais 7 dias; sem contato, a data da candidatura mais 7 dias.
@@ -52,11 +52,11 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 
 ## Casos de uso
 
-1. **Resumo da manhã** — o usuário pergunta ao agente o que fazer hoje; o agente chama `resumo_do_dia` e apresenta os itens vencidos, os que vencem em breve e as vagas na fila.
-2. **Registrar uma conversa** — o usuário conta que falou com um contato; o agente chama `registrar_interacao`; o follow-up do contato é recalculado e, se houver vaga vinculada, a data do último contato da vaga é atualizada.
-3. **Candidatura feita** — o usuário diz que se candidatou; o agente chama `atualizar_vaga` com o novo status, a data e o próximo passo; a mudança entra no histórico.
-4. **Vaga nova** — o agente recebe um link; chama `registrar_vaga`; se o link já existir, informa a duplicidade em vez de criar outra linha.
-5. **Cobrança pendente** — o usuário pergunta quem ele precisa cobrar; o agente chama `followups_pendentes` e lista vagas e contatos por urgência.
+1. **Resumo da manhã** — o usuário pergunta ao agente o que fazer hoje; o agente chama `daily_summary` e apresenta os itens vencidos, os que vencem em breve e as vagas na fila.
+2. **Registrar uma conversa** — o usuário conta que falou com um contato; o agente chama `log_interaction`; o follow-up do contato é recalculado e, se houver vaga vinculada, a data do último contato da vaga é atualizada.
+3. **Candidatura feita** — o usuário diz que se candidatou; o agente chama `update_job` com o novo status, a data e o próximo passo; a mudança entra no histórico.
+4. **Vaga nova** — o agente recebe um link; chama `add_job`; se o link já existir, informa a duplicidade em vez de criar outra linha.
+5. **Cobrança pendente** — o usuário pergunta quem ele precisa cobrar; o agente chama `pending_followups` e lista vagas e contatos por urgência.
 
 ## Critérios de aceitação
 
@@ -64,10 +64,10 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 - [ ] Cadastrar duas vezes o mesmo link devolve erro de duplicidade e não cria a segunda vaga.
 - [ ] Status inválido é rejeitado com a lista de status válidos.
 - [ ] Com data de referência fixa, uma vaga com último contato há 7 dias aparece como vencida e outra com 5 dias aparece como a vencer.
-- [ ] Vaga em status encerrado não aparece em `followups_pendentes`.
-- [ ] `registrar_interacao` em contato vinculado a uma vaga atualiza a data do último contato da vaga.
-- [ ] Toda chamada de `atualizar_vaga` que muda o status gera uma linha de histórico com valor anterior e novo.
-- [ ] `resumo_do_dia` devolve contagem por status, itens vencidos, itens a vencer e fila de candidatura ordenada por nota.
+- [ ] Vaga em status encerrado não aparece em `pending_followups`.
+- [ ] `log_interaction` em contato vinculado a uma vaga atualiza a data do último contato da vaga.
+- [ ] Toda chamada de `update_job` que muda o status gera uma linha de histórico com valor anterior e novo.
+- [ ] `daily_summary` devolve contagem por status, itens vencidos, itens a vencer e fila de candidatura ordenada por nota.
 - [ ] A suíte de testes roda sem acesso à rede e sem tocar em banco fora do diretório temporário de teste.
 - [ ] O repositório não contém nomes de pessoas, empresas em negociação nem valores reais; os dados em `data/seed/` são identificáveis como fictícios.
 
@@ -80,5 +80,4 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 
 ## Questões em aberto
 
-- Licença do projeto (decisão do autor; não bloqueia a implementação).
-- Idioma dos nomes das ferramentas: português, como está, ou inglês para alcance maior (decisão do autor; resolver antes da tarefa 03, porque muda o contrato público).
+Nenhuma que bloqueie o MVP. Decididas pelo autor em 2026-10-10: licença MIT; nomes de ferramentas, parâmetros, tabelas, campos e valores de status em inglês; documentação em português.

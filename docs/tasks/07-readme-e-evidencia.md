@@ -24,7 +24,6 @@ Documentar instalação, configuração no cliente e uso, e registrar a verifica
 3. Conectar o servidor a um cliente MCP e executar os cinco casos de uso com o banco de demonstração.
 4. Registrar em `docs/evidence/` o que foi pedido ao agente, as ferramentas chamadas e o resultado, sem dados reais.
 5. Marcar os critérios de aceitação da especificação e mudar o estado do README de "em especificação" para o estado real.
-6. Decidir a licença com o autor e adicioná-la.
 
 ## Critérios de conclusão
 

@@ -11,7 +11,7 @@
 - **Lógica de domínio separada do servidor.** As regras (status válidos, follow-up, histórico, resumo) ficam em funções Python puras, que recebem a conexão e a data de referência. O módulo do servidor só registra as ferramentas e converte entrada e saída. Isso permite testar tudo sem subir o servidor.
 - **Data de referência injetável.** Nenhuma regra chama a data atual por conta própria; a data entra como parâmetro, com padrão "hoje" apenas na borda (a ferramenta).
 - **Caminho do banco por variável de ambiente** (`JOB_SEARCH_DB`), com padrão em `data/local/job_search.db`, que está fora do Git.
-- **Erros de negócio como respostas estruturadas.** Duplicidade e status inválido devolvem um objeto com `erro` e `detalhe`, em vez de exceção sem contexto, para o agente conseguir explicar ao usuário.
+- **Erros de negócio como respostas estruturadas.** Duplicidade e status inválido devolvem um objeto com `error` e `detail`, em vez de exceção sem contexto, para o agente conseguir explicar ao usuário.
 
 ## Componentes afetados
 
@@ -22,62 +22,62 @@ pyproject.toml
 src/job_search_mcp/
   __init__.py
   db.py          conexão, criação do esquema e carga dos dados sintéticos
-  dominio.py     constantes (status), regras de follow-up e classificação
-  vagas.py       listar, registrar e atualizar vagas, com histórico
-  contatos.py    listar contatos e registrar interações
-  resumo.py      followups_pendentes e resumo_do_dia
+  domain.py     constantes (status), regras de follow-up e classificação
+  jobs.py       listar, registrar e atualizar vagas, com histórico
+  contacts.py    listar contatos e registrar interações
+  summary.py      pending_followups e daily_summary
   server.py      registro das ferramentas no FastMCP e ponto de entrada
 data/seed/
-  vagas.csv      dados sintéticos
-  contatos.csv   dados sintéticos
+  jobs.csv       dados sintéticos
+  contacts.csv   dados sintéticos
 tests/
   conftest.py    banco temporário e data de referência fixa
-  test_dominio.py
-  test_vagas.py
-  test_contatos.py
-  test_resumo.py
+  test_domain.py
+  test_jobs.py
+  test_contacts.py
+  test_summary.py
   test_server.py
 ```
 
 ## Modelo de dados
 
-**vaga**
+**job**
 
 | Campo | Tipo | Observação |
 |---|---|---|
 | id | inteiro, chave | |
-| empresa | texto, obrigatório | |
-| titulo | texto, obrigatório | |
-| link | texto, único | usado para evitar duplicidade |
-| trilha | texto | dados, sistemas, produto, ia, outra |
-| nota | real | 0 a 10 |
+| company | texto, obrigatório | |
+| title | texto, obrigatório | |
+| url | texto, único | usado para evitar duplicidade |
+| track | texto | data, systems, product, ai, other |
+| score | real | 0 a 10 |
 | status | texto, obrigatório | lista fechada, ver abaixo |
-| proximo_passo | texto | |
-| data_candidatura | data | |
-| data_ultimo_contato | data | |
-| criado_em | data e hora | |
+| next_step | texto | |
+| applied_on | data | |
+| last_contact_on | data | |
+| created_at | data e hora | |
 
-**contato**
+**contact**
 
 | Campo | Tipo | Observação |
 |---|---|---|
 | id | inteiro, chave | |
-| nome | texto, obrigatório | |
-| empresa | texto | |
-| relacao | texto | |
-| canal | texto | |
+| name | texto, obrigatório | |
+| company | texto | |
+| relationship | texto | |
+| channel | texto | |
 | status | texto, obrigatório | lista fechada, ver abaixo |
-| proximo_passo | texto | |
-| data_ultimo_contato | data | |
-| vaga_id | inteiro, opcional | referência a vaga |
+| next_step | texto | |
+| last_contact_on | data | |
+| job_id | inteiro, opcional | referência a vaga |
 
-**interacao**: id, contato_id, data, resumo.
+**interaction**: id, contact_id, date, summary.
 
-**historico_vaga**: id, vaga_id, data, campo, valor_anterior, valor_novo, origem.
+**job_history**: id, job_id, date, field, old_value, new_value, source.
 
-**Status de vaga:** sugerida, a_candidatar, bloqueada, candidatado, em_analise, entrevista_rh, entrevista_tecnica, entrevista_gestor, proposta, aprovado, reprovado, desisti, encerrada. Encerram o follow-up: aprovado, reprovado, desisti, encerrada. Não geram follow-up: sugerida, a_candidatar, bloqueada.
+**Status de vaga (`job.status`):** suggested, to_apply, blocked, applied, in_review, hr_interview, tech_interview, manager_interview, offer, hired, rejected, withdrawn, closed. Encerram o follow-up: hired, rejected, withdrawn, closed. Não geram follow-up: suggested, to_apply, blocked.
 
-**Status de contato:** a_contatar, aguardando_resposta, em_conversa, curriculo_enviado, indicado, encerrado. Não geram follow-up: a_contatar, encerrado.
+**Status de contato (`contact.status`):** to_contact, awaiting_reply, in_conversation, resume_sent, referred, closed. Não geram follow-up: to_contact, closed.
 
 Sem migrações: o esquema é criado na primeira execução.
 
@@ -87,13 +87,13 @@ Ferramentas MCP (contrato público do projeto):
 
 | Ferramenta | Parâmetros | Retorno |
 |---|---|---|
-| `listar_vagas` | `status?`, `trilha?`, `nota_minima?` | lista de vagas |
-| `registrar_vaga` | `empresa`, `titulo`, `link`, `trilha?`, `nota?`, `proximo_passo?` | vaga criada, ou erro de duplicidade com a vaga existente |
-| `atualizar_vaga` | `vaga_id`, `status?`, `proximo_passo?`, `data_candidatura?`, `data_ultimo_contato?`, `origem` | vaga atualizada e linhas de histórico geradas |
-| `listar_contatos` | `status?`, `empresa?` | lista de contatos |
-| `registrar_interacao` | `contato_id`, `resumo`, `data?`, `status?`, `proximo_passo?` | contato atualizado, follow-up novo e vaga vinculada, se houver |
-| `followups_pendentes` | `data_referencia?`, `dias_a_vencer?` (padrão 2) | vagas e contatos, cada um com `follow_up` e `situacao` (vencido, a_vencer) |
-| `resumo_do_dia` | `data_referencia?` | contagem por status, vencidos, a vencer, fila de candidatura por nota e dias até um prazo opcional |
+| `list_jobs` | `status?`, `track?`, `min_score?` | lista de vagas |
+| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada, ou erro de duplicidade com a vaga existente |
+| `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas |
+| `list_contacts` | `status?`, `company?` | lista de contatos |
+| `log_interaction` | `contact_id`, `summary`, `date?`, `status?`, `next_step?` | contato atualizado, follow-up novo e vaga vinculada, se houver |
+| `pending_followups` | `reference_date?`, `days_ahead?` (padrão 2) | vagas e contatos, cada um com `follow_up` e `state` (overdue, due_soon) |
+| `daily_summary` | `reference_date?` | contagem por status, vencidos, a vencer, fila de candidatura por nota e dias até um prazo opcional |
 
 Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado, renomear ferramenta ou parâmetro passa a ser mudança incompatível.
 
@@ -121,6 +121,6 @@ Cada etapa é uma tarefa em `docs/tasks/`, na ordem:
 2. `02-banco-e-dados-sinteticos.md` — esquema SQLite, conexão e carga de `data/seed/`.
 3. `03-regras-de-dominio-e-vagas.md` — status, follow-up, listar, registrar e atualizar vagas com histórico.
 4. `04-contatos-e-interacoes.md` — listar contatos e registrar interações.
-5. `05-followups-e-resumo.md` — `followups_pendentes` e `resumo_do_dia`.
+5. `05-followups-e-resumo.md` — `pending_followups` e `daily_summary`.
 6. `06-servidor-mcp.md` — registro das sete ferramentas no FastMCP e teste de integração.
 7. `07-readme-e-evidencia.md` — instruções de uso, configuração no cliente e evidência da verificação manual.
