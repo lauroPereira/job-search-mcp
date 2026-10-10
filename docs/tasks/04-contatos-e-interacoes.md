@@ -63,6 +63,24 @@ Desvios e decisões:
 - `list_contacts` devolve erro `invalid_status` para filtro de status fora da lista. O filtro de empresa compara o nome inteiro, sem diferenciar maiúsculas de minúsculas em letras sem acento (`COLLATE NOCASE` do SQLite).
 - A gravação da interação, do contato e da vaga acontece em uma única transação; para isso `contacts.py` reutiliza `jobs.apply_job_changes`, que não faz commit.
 
+### Correções da revisão (pull request #6)
+
+Executadas em 2026-10-10, no mesmo ambiente, depois de trazer por merge as correções da tarefa 03 (pull request #5).
+
+| Comando | Resultado observado |
+|---|---|
+| `python -m pytest` | `85 passed` (16 em `tests/test_contacts.py`, 14 em `tests/test_db.py`, 29 em `tests/test_domain.py`, 25 em `tests/test_jobs.py`, 1 em `tests/test_smoke.py`; código 0) |
+| `python -m ruff check .` | `All checks passed!` (código 0) |
+| `python tools/scripts/lint_and_tests.py --strict` | pytest `85 passed`, ruff `All checks passed!`, `Skills válidas.`, `Validação estrita concluída sem falhas.` (código 0) |
+
+O que mudou:
+
+- Regra nova, decisão de produto: quando o contato está em `to_contact` e a chamada não informa `status`, `log_interaction` avança o status para `awaiting_reply`. A primeira conversa registrada tira o contato de "a contatar", e ele passa a ter follow-up. Com `status` explícito vale o informado, inclusive `to_contact`. Contatos em outros status continuam como estavam quando o `status` não é informado.
+- Testes: `test_log_interaction_without_status_moves_to_contact_to_awaiting_reply` (contato 8 passa a `awaiting_reply`, com follow-up em 2026-03-22, a data da interação mais 6 dias, no retorno e no banco), `test_log_interaction_with_explicit_status_on_to_contact_keeps_the_informed_status` e `test_log_interaction_without_status_keeps_the_status_of_other_contacts`.
+- A regra foi registrada no plano, na linha de `log_interaction` da tabela de ferramentas.
+- Com isso, o critério "Contato em status closed ou to_contact não tem follow-up" segue valendo para o status em si; o que mudou é que registrar uma interação sem `status` deixa de manter o contato em `to_contact`.
+- A regra "a data do último contato nunca volta no tempo" não foi alterada. A recusa de data futura fica para a camada do servidor: a tarefa 06 recebeu, nos passos, as validações de borda (recusar datas futuras em `log_interaction` e `update_job`, tipar e validar `days_ahead`, não expor `reference_date` de `update_job` e converter datas recebidas como texto).
+
 ## Status
 
 ```text

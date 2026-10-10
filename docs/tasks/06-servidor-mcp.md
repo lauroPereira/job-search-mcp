@@ -26,7 +26,12 @@ Expor as sete operações como ferramentas MCP por stdio.
 3. Em cada ferramenta, abrir a conexão no caminho configurado, criar o esquema se o banco for novo, aplicar o padrão "hoje" para a data de referência e delegar à função de domínio.
 4. Adicionar um ponto de entrada `job-search-mcp` que sobe o servidor em stdio e uma opção para carregar o seed em um banco novo.
 5. Testar a listagem das ferramentas e uma chamada de ponta a ponta pelo cliente em memória do pacote fastmcp (`from fastmcp import Client`).
-6. Verificar a saída estruturada: conferir o que o cliente recebe de uma ferramenta com retorno `dict` (dado estruturado ou só texto) e ajustar o retorno das ferramentas para que resultados e erros de negócio cheguem estruturados. Registrar o que foi observado na Validação.
+6. Validar as entradas na borda, antes de delegar ao domínio (pontos levantados na revisão das tarefas 03 a 05):
+   - recusar datas futuras (posteriores à data atual) em `log_interaction` (`date`) e em `update_job` (`applied_on` e `last_contact_on`), com erro estruturado;
+   - tipar `days_ahead` como inteiro e recusar valor negativo (inteiro >= 0);
+   - não expor `reference_date` como parâmetro de `update_job`: a ferramenta passa a data atual ao domínio;
+   - converter as datas recebidas como texto (ISO 8601, AAAA-MM-DD) antes de usá-las, devolvendo `invalid_date` quando o texto for inválido.
+7. Verificar a saída estruturada: conferir o que o cliente recebe de uma ferramenta com retorno `dict` (dado estruturado ou só texto) e ajustar o retorno das ferramentas para que resultados e erros de negócio cheguem estruturados. Registrar o que foi observado na Validação.
 
 ## Critérios de conclusão
 
