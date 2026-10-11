@@ -32,7 +32,7 @@ flowchart LR
 
 ## Ferramentas
 
-Todas devolvem um objeto estruturado, tanto no resultado quanto no erro de negócio. A exceção são os erros de protocolo: argumento de tipo errado (por exemplo `job_id="abc"`), parâmetro obrigatório ausente ou parâmetro desconhecido são recusados antes de a ferramenta rodar e chegam ao cliente como erro em texto, como é padrão no MCP.
+Todas devolvem um objeto estruturado, tanto no resultado quanto no erro de negócio. A exceção são os erros de protocolo: argumento que não converte para o tipo do parâmetro (por exemplo `job_id="abc"`), parâmetro obrigatório ausente ou parâmetro desconhecido são recusados antes de a ferramenta rodar e chegam ao cliente como erro em texto, como é padrão no MCP. Argumento de outro tipo que converte é convertido e aceito: `job_id="1"` vale como 1, `score="8"` como 8.0 e `score=true` como 1.0.
 
 Datas são texto no formato ISO 8601 (`AAAA-MM-DD`). Parâmetros com `?` são opcionais.
 
@@ -115,7 +115,7 @@ $env:JOB_SEARCH_DB = "C:\caminho\absoluto\para\job_search_demo.db"
 job-search-mcp --seed
 ```
 
-O comando cria o banco, carrega os dados e encerra. Se o banco já tiver dados, ele recusa e não altera nada; se o caminho não puder ser usado (um diretório no lugar do arquivo, falta de permissão), ele mostra uma mensagem curta e termina com código de saída 1. As datas do seed giram em torno de **2026-03-16**: para ver follow-ups vencidos e a vencer como nos exemplos abaixo, peça ao agente para usar essa data de referência.
+O comando cria o banco, carrega os dados e encerra. Se o banco já tiver dados, ele recusa e não altera nada; se o caminho não puder ser usado (um diretório no lugar do arquivo, falta de permissão) ou se os arquivos de `data/seed/` não forem encontrados, ele mostra uma mensagem curta, que diz qual dos dois foi o caso, e termina com código de saída 1. As datas do seed giram em torno de **2026-03-16**: para ver follow-ups vencidos e a vencer como nos exemplos abaixo, peça ao agente para usar essa data de referência.
 
 Para usar com os seus dados, aponte `JOB_SEARCH_DB` para outro arquivo e não rode o `--seed`: o banco é criado vazio na primeira chamada.
 

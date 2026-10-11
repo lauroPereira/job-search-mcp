@@ -36,7 +36,7 @@ Documentar instalação, configuração no cliente e uso, e registrar a verifica
 
 ## Validação
 
-Executada em 2026-10-10, no Windows 11, com Python 3.12.7, na branch `feat/07-readme-e-evidencia`, criada a partir de `feat/06-servidor-mcp` (commit `3bcfac0`, pull request #8, ainda não integrado em `develop`). Esta tarefa só altera documentação.
+Executada em 2026-10-10, no Windows 11, com Python 3.12.7, na branch `feat/07-readme-e-evidencia`, criada a partir de `feat/06-servidor-mcp` (commit `f697f95`, pull request #8, ainda não integrado em `develop`). Esta tarefa só altera documentação.
 
 ### O que foi feito
 
@@ -70,7 +70,7 @@ Conferidos na documentação em 2026-10-10:
 
 ### Correções da revisão do pull request #9
 
-Aplicadas em 2026-10-10, no mesmo ambiente, como commits novos na branch `feat/07-readme-e-evidencia`, depois de trazer por merge as correções da tarefa 06 (commit `a1961d5` de `feat/06-servidor-mcp`; ver a Validação daquela tarefa). A revisão não apontou defeito funcional. Esta tarefa continua só alterando documentação; o código que mudou veio da tarefa 06.
+Aplicadas em 2026-10-10, no mesmo ambiente, como commits novos na branch `feat/07-readme-e-evidencia`, depois de trazer por merge as correções da tarefa 06 (commit `b95a48c` de `feat/06-servidor-mcp`; ver a Validação daquela tarefa). A revisão não apontou defeito funcional. Esta tarefa continua só alterando documentação; o código que mudou veio da tarefa 06.
 
 | Ressalva | Correção no README ou na evidência |
 |---|---|
@@ -108,9 +108,11 @@ Conferido em 2026-10-10 com `git ls-tree origin/main`: `main` ainda não tem `sr
 
 ### CI do pull request
 
-Pull request #9 (commit `9e2f7e8`): `gh pr checks 9` devolveu `validate pass 24s`. O commit que registra esta linha dispara uma nova execução, conferida no relatório de passagem.
+Pull request #9 (commit `2cd6a4d`): `gh pr checks 9` devolveu `validate pass 24s`. O commit que registra esta linha dispara uma nova execução, conferida no relatório de passagem.
 
-Depois das correções da revisão (commit `a33306f`): `gh pr checks 9` devolveu `validate pass 26s`; no log da execução, em Ubuntu, `151 passed`. O commit que registra este parágrafo só altera este arquivo e dispara mais uma execução, conferida no relatório de passagem.
+Depois das correções da revisão (commit `1b027c5`): `gh pr checks 9` devolveu `validate pass 26s`; no log da execução, em Ubuntu, `151 passed`. O commit que registra este parágrafo só altera este arquivo e dispara mais uma execução, conferida no relatório de passagem.
+
+Os SHAs citados nesta tarefa são os atuais: o histórico de `develop` foi reescrito em 2026-10-10 para corrigir o e-mail de autor dos commits de merge, sem alterar o conteúdo, e os SHAs originais deixaram de existir em `develop` (correspondência em `docs/tasks/08-ajustes-da-revisao-06-07.md`).
 
 ### Limitações e pendências
 
