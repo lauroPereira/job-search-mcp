@@ -106,7 +106,7 @@ Textos ajustados: a linha de `track` e `score` na tabela de correções de `docs
 
 ### Limitações
 
-- O CI não rodou sobre esta branch: os commits são locais, sem push e sem pull request, conforme o despacho.
+- CI: o workflow `validate` passou no pull request 11 sobre `8bdd85c` (`152 passed`, ruff sem achados). Os commits seguintes desta branch só alteram este registro.
 - A mensagem dos dados ausentes só foi exercitada com `db.SEED_DIR` trocado no processo (ver A3).
 - A checagem dos dados de demonstração repete os dois nomes de arquivo usados por `db.load_seed`. Um CSV presente mas malformado continua fora do tratamento (não fazia parte do achado).
 - A validação estrita, ao listar os arquivos Python, incluiu uma cópia de `lint_and_tests.py` em `.claude/worktrees/`, diretório local que já existia e não foi tocado.
@@ -117,4 +117,4 @@ Textos ajustados: a linha de `track` e `score` na tabela de correções de `docs
 concluída
 ```
 
-Aguardando revisão e, por decisão do responsável humano, push e pull request para `develop`.
+Pull request 11 aberto para `develop`. Revisão independente de `8bdd85c`: apto, com três achados de severidade baixa (este registro desatualizado, corrigido aqui; o teste novo só discrimina a mudança enquanto `load_seed` fixar `SEED_DIR` na definição; frase ambígua na linha de `track`/`score` da tarefa 06). A integração em `develop` aguarda o responsável humano.
