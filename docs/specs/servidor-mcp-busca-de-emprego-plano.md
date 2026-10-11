@@ -87,10 +87,10 @@ Ferramentas MCP (contrato público do projeto):
 
 | Ferramenta | Parâmetros | Retorno |
 |---|---|---|
-| `list_jobs` | `status?`, `track?`, `min_score?` | lista de vagas |
+| `list_jobs` | `status?`, `track?`, `min_score?` | objeto com a lista de vagas em `jobs` |
 | `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada no status `suggested`, ou erro de duplicidade com a vaga existente |
 | `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas; ao mudar para `applied` sem data de candidatura (nem gravada nem informada), `applied_on` recebe a data de referência, com a linha de histórico correspondente |
-| `list_contacts` | `status?`, `company?` | lista de contatos |
+| `list_contacts` | `status?`, `company?` | objeto com a lista de contatos em `contacts` |
 | `log_interaction` | `contact_id`, `summary`, `date?`, `status?`, `next_step?` | contato atualizado, follow-up novo e vaga vinculada, se houver; contato em `to_contact` registrado sem `status` avança para `awaiting_reply` (com `status` informado, vale o informado) |
 | `pending_followups` | `reference_date?`, `days_ahead?` (padrão 2) | vagas e contatos, cada um com `follow_up` e `state` (overdue, due_soon) |
 | `daily_summary` | `reference_date?`, `deadline?` | contagem de vagas por status, contagem de contatos ativos (os que não estão em `closed`), vencidos, a vencer, fila de candidatura por nota e dias até o prazo (`deadline`), quando informado |
