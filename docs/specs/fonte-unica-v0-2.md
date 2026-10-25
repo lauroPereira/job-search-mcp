@@ -88,15 +88,15 @@ A pessoa importa os dados atuais uma vez e passa a usar só o servidor: empresas
 
 ## Critérios de aceitação
 
-- [ ] Os seis casos de uso funcionam com os dados sintéticos, com evidência em `docs/evidence/`.
-- [ ] Teste automatizado: nenhuma ferramenta de escrita altera o banco sem confirmação.
-- [ ] Teste automatizado: confirmação de proposta desatualizada é recusada.
-- [ ] Teste automatizado: toda escrita gera histórico com origem; escrita sem origem é recusada.
-- [ ] Teste automatizado: um banco da `v0.1.0` com o seed atual migra sem perda, com empresas unidas por nome.
-- [ ] Teste automatizado: importar o mesmo CSV duas vezes não duplica registros.
-- [ ] As métricas do funil batem com contagem feita à mão sobre os dados sintéticos.
-- [ ] O servidor funciona sem arquivo de configuração, com os padrões genéricos.
-- [ ] Busca nos arquivos versionados não encontra dado real.
+- [ ] Os seis casos de uso funcionam com os dados sintéticos, com evidência em `docs/evidence/`. Verificação por cliente MCP programático feita ([evidência](../evidence/2026-10-25-verificacao-v0-2.md), todos os seis casos conferem); falta a verificação em conversa real no Claude Code, a cargo do responsável humano (roteiro na mesma evidência).
+- [x] Teste automatizado: nenhuma ferramenta de escrita altera o banco sem confirmação. `tests/test_proposals.py::test_a_proposal_changes_nothing_and_its_confirmation_applies_it` e `tests/test_server.py::test_write_tools_only_propose_and_changes_confirm_applies` (retrato do banco para as sete ferramentas de escrita); também na evidência, casos 2, 3 e 5.
+- [x] Teste automatizado: confirmação de proposta desatualizada é recusada. `tests/test_proposals.py` (`test_a_proposal_on_a_record_changed_since_then_is_stale` e seguintes) e `tests/test_server.py::test_changes_confirm_refuses_stale_expired_and_unknown_proposals`; também na evidência (extra do caso 2).
+- [x] Teste automatizado: toda escrita gera histórico com origem; escrita sem origem é recusada. `tests/test_proposals.py` (confirmação com histórico e `source_type`; `test_validation_errors_come_back_at_once_without_a_proposal`), `tests/test_history.py` e `tests/test_server.py::test_add_job_refuses_an_empty_source_and_records_the_given_one`.
+- [x] Teste automatizado: um banco da `v0.1.0` com o seed atual migra sem perda, com empresas unidas por nome. `tests/test_migration.py` (15 testes, com o seed da `v0.1.0` em `tests/fixtures/seed_v1/`); também na evidência, seção "Banco da v0.1.0 migrado".
+- [x] Teste automatizado: importar o mesmo CSV duas vezes não duplica registros. `tests/test_transfer.py::test_second_import_finds_only_duplicates` e `test_import_command_with_apply_writes_and_a_second_run_finds_duplicates`; também na evidência, caso 1.
+- [x] As métricas do funil batem com contagem feita à mão sobre os dados sintéticos. `tests/test_summary.py::test_funnel_metrics_match_the_hand_count_over_the_seed` (contagem anotada no teste); também na evidência, caso 6.
+- [x] O servidor funciona sem arquivo de configuração, com os padrões genéricos. `tests/test_config.py` (`test_without_the_variable_the_defaults_apply`, `test_a_missing_file_gives_the_defaults`) e a suíte inteira, que roda sem `JOB_SEARCH_CONFIG`; a evidência também rodou sem configuração, exceto uma chamada do caso 6.
+- [x] Busca nos arquivos versionados não encontra dado real. Busca da tarefa 16, registrada em `docs/tasks/16-readme-evidencia-e-versao.md` (Validação).
 
 ## Riscos
 
