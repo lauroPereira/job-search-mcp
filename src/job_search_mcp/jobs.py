@@ -19,6 +19,8 @@ APPLIED_STATUS = "applied"
 JOB_UPDATABLE_FIELDS = history.UPDATABLE_FIELDS["application"]
 # What was sent with the application, read at the end of a job (after `people`).
 APPLICATION_DETAILS = ("resume_track", "salary_ask", "contract_type")
+# Longest salary_ask and contract_type accepted by update_job.
+APPLICATION_TEXT_MAX = 100
 
 # Job, application and company joined, with the keys (and their order) of v0.1.0.
 JOB_SELECT = """
@@ -317,7 +319,8 @@ def plan_update_job(
     depends on the version of the application; applying it returns the updated job and
     the history lines created. Errors are structured and nothing is planned.
     `resume_track` (the track of the resume sent) must be one of domain.JOB_TRACKS;
-    `salary_ask` and `contract_type` (what was sent with the application) are free text.
+    `salary_ask` and `contract_type` (what was sent with the application) are free text of
+    up to APPLICATION_TEXT_MAX characters. An empty or blank value of these three is refused.
     """
     origin = parse_source(source)
     if domain.is_error(origin):
@@ -330,6 +333,20 @@ def plan_update_job(
         return domain.not_found("job", job_id)
     if status is not None and status not in domain.JOB_STATUSES:
         return domain.invalid_status(status, domain.JOB_STATUSES)
+    details = {
+        "resume_track": resume_track,
+        "salary_ask": salary_ask,
+        "contract_type": contract_type,
+    }
+    for field, value in details.items():
+        if value is not None and not value.strip():
+            return domain.error("invalid_input", f"Field '{field}' cannot be empty.")
+    for field in ("salary_ask", "contract_type"):
+        if details[field] is not None and len(details[field]) > APPLICATION_TEXT_MAX:
+            return domain.error(
+                "invalid_input",
+                f"Field '{field}' is too long: use up to {APPLICATION_TEXT_MAX} characters.",
+            )
     if resume_track is not None and resume_track not in domain.JOB_TRACKS:
         return domain.invalid_choice("resume_track", resume_track, domain.JOB_TRACKS)
     changes = {"status": status, "next_step": next_step}
@@ -342,11 +359,7 @@ def plan_update_job(
     becomes_applied = status == APPLIED_STATUS and job["status"] != APPLIED_STATUS
     if becomes_applied and not job["applied_on"] and changes["applied_on"] is None:
         changes["applied_on"] = changed_on.isoformat()
-    changes |= {
-        "resume_track": resume_track,
-        "salary_ask": salary_ask,
-        "contract_type": contract_type,
-    }
+    changes |= details
     changes = {field: value for field, value in changes.items() if value is not None}
     record_id = application_id(connection, job_id)
 

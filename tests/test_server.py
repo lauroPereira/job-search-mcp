@@ -442,6 +442,10 @@ def test_update_job_refuses_a_resume_track_outside_the_tracks(db_path):
     result = structured("update_job", job_id=2, source="user", resume_track="dados")
     assert result["error"] == "invalid_input"
     assert result["valid_values"] == ["data", "systems", "product", "ai", "other"]
+    for arguments in ({"salary_ask": "  "}, {"contract_type": "x" * 101}):
+        assert structured("update_job", job_id=2, source="user", **arguments)["error"] == (
+            "invalid_input"
+        )
     assert snapshot(db_path) == before
     assert structured("changes_list_pending") == {"proposals": []}
 

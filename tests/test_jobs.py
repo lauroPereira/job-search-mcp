@@ -430,7 +430,7 @@ def test_update_job_records_what_was_sent_with_the_application(connection, refer
     assert [(line["old_value"], line["new_value"]) for line in again["history"]] == [("PJ", "CLT")]
 
 
-@pytest.mark.parametrize("resume_track", ["dados", "none", "DATA", ""])
+@pytest.mark.parametrize("resume_track", ["dados", "none", "DATA"])
 def test_update_job_with_invalid_resume_track_returns_error_and_changes_nothing(
     connection, reference_date, resume_track
 ):
@@ -447,6 +447,56 @@ def test_update_job_with_invalid_resume_track_returns_error_and_changes_nothing(
     assert result["valid_values"] == list(domain.JOB_TRACKS)
     assert jobs.get_job(connection, 2) == before
     assert count(connection, "history") == 0
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "reason"),
+    [
+        ("resume_track", "", "cannot be empty"),
+        ("resume_track", "   ", "cannot be empty"),
+        ("salary_ask", "", "cannot be empty"),
+        ("salary_ask", "  ", "cannot be empty"),
+        ("contract_type", " ", "cannot be empty"),
+        ("salary_ask", "x" * 101, "too long"),
+        ("contract_type", "x" * 101, "too long"),
+    ],
+)
+def test_update_job_refuses_blank_or_too_long_application_details(
+    connection, reference_date, field, value, reason
+):
+    before = jobs.get_job(connection, 2)
+    result = jobs.plan_update_job(
+        connection, 2, source="user", reference_date=reference_date, **{field: value}
+    )
+    assert result["error"] == "invalid_input"
+    assert field in result["detail"] and reason in result["detail"]
+    assert jobs.get_job(connection, 2) == before
+    assert count(connection, "history") == 0
+
+
+def test_update_job_accepts_application_details_at_the_length_limit(connection, reference_date):
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection,
+            2,
+            source="user",
+            reference_date=reference_date,
+            salary_ask="x" * 100,
+            contract_type="y" * 100,
+        ),
+    )
+    assert (result["job"]["salary_ask"], result["job"]["contract_type"]) == ("x" * 100, "y" * 100)
+
+
+def test_update_job_keeps_the_v1_behaviour_of_an_empty_next_step(connection, reference_date):
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 2, source="user", reference_date=reference_date, next_step=""
+        ),
+    )
+    assert result["job"]["next_step"] == ""
 
 
 def test_update_job_with_invalid_date_returns_error_and_changes_nothing(connection, reference_date):

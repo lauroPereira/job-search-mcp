@@ -88,7 +88,7 @@ Cada linha cria a vaga e a sua candidatura (1:1).
 | `applied_on` | não | data |
 | `last_contact_on` | não | data |
 | `next_step` | não | texto |
-| `resume_track` | não | texto (versão do currículo enviada) |
+| `resume_track` | não | trilha do currículo enviado (`data`, `systems`, `product`, `ai`, `other`) |
 | `salary_ask` | não | texto (pretensão enviada) |
 | `contract_type` | não | texto (CLT, PJ...) |
 

@@ -384,6 +384,7 @@ class _Importer:
 
     def jobs_csv(self, row: dict, ref: str) -> str | None:
         track = _choice("track", row["track"], domain.JOB_TRACKS)
+        resume_track = _choice("resume_track", row["resume_track"], domain.JOB_TRACKS)
         score = _score(row["score"])
         created_at = _timestamp("created_at", row["created_at"], self.changed_on)
         status = _choice("status", row["status"], domain.JOB_STATUSES, DEFAULT_JOB_STATUS)
@@ -415,7 +416,7 @@ class _Importer:
             "applied_on": applied_on,
             "last_contact_on": last_contact_on,
             "next_step": row["next_step"],
-            "resume_track": row["resume_track"],
+            "resume_track": resume_track,
             "salary_ask": row["salary_ask"],
             "contract_type": row["contract_type"],
         }

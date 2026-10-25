@@ -199,10 +199,10 @@ def update_job(
         Field(description="Track of the resume sent: data, systems, product, ai or other."),
     ] = None,
     salary_ask: Annotated[
-        str | None, Field(description="Salary expectation sent, as short free text.")
+        str | None, Field(description="Salary expectation sent, as free text up to 100 characters.")
     ] = None,
     contract_type: Annotated[
-        str | None, Field(description="Contract type sent, as short free text (such as CLT, PJ).")
+        str | None, Field(description="Contract type sent (such as CLT, PJ), up to 100 characters.")
     ] = None,
 ) -> dict[str, Any]:
     """Propose updating the informed fields of a job; fields left out are not touched.
@@ -214,8 +214,9 @@ def update_job(
     proposal. Once confirmed, changes_confirm returns {"job": the updated job,
     "history": the history lines created}, one line for each field that really changed,
     dated the day of the proposal. Changing the status to 'applied' on a job without an
-    application date sets applied_on to that day. A resume_track outside the tracks is the
-    error 'invalid_input'.
+    application date sets applied_on to that day. A resume_track outside the tracks, an empty
+    resume_track, salary_ask or contract_type, or one of the last two longer than 100
+    characters is the error 'invalid_input'.
     """
     arguments = {"job_id": job_id, "source": source, "reference_date": today().isoformat()}
     arguments |= {"status": status, "next_step": next_step}
