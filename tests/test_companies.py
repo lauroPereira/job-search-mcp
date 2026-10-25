@@ -119,7 +119,7 @@ def test_a_duplicate_name_is_refused_with_the_existing_company(connection, name)
 
 def test_change_touches_only_the_informed_fields_and_bumps_the_version(connection):
     write(connection, save(connection, company_id=1, name="Banco Aurora", sector="Finanças"))
-    plan = save(connection, company_id=1, name="Banco Aurora", priority="A")
+    plan = save(connection, company_id=1, priority="A")
     assert plan.base_versions == {"company:1": 2}
     assert plan.changes == [
         {
@@ -151,6 +151,7 @@ def test_rename_updates_the_normalized_name(connection):
     ("arguments", "code"),
     [
         ({"name": " "}, "invalid_input"),
+        ({"sector": "Varejo"}, "invalid_input"),
         ({"name": "Empresa X", "priority": "D"}, "invalid_input"),
         ({"name": "Empresa X", "source": " "}, "invalid_input"),
         ({"name": "Empresa X", "reference_date": "ontem"}, "invalid_date"),

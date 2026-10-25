@@ -178,7 +178,7 @@ def plan_log_interaction(
 
 def plan_save_person(
     connection: sqlite3.Connection,
-    name: str,
+    name: str | None = None,
     contact_id: int | None = None,
     company: str | None = None,
     role_title: str | None = None,
@@ -193,8 +193,9 @@ def plan_save_person(
 ) -> domain.Plan | dict:
     """Plan the creation of a person (no `contact_id`) or the change of one, writing nothing.
 
-    The name is required. A company is given by name and found by normalized name
-    (db.normalize_name); when no company has it, the plan creates the company too. A new
+    The name is required to create and optional in a change. A company is given by name
+    and found by normalized name (db.normalize_name); when no company has it, the plan
+    creates the company too. A new
     person without a status starts in to_contact. In a change, fields left as None (or
     blank) are not touched; on_hold takes the person out of the follow-ups. `source` and
     `reference_date` go to the history, one line per created or changed field (the company
@@ -202,8 +203,8 @@ def plan_save_person(
     applying the plan returns {"contact": the saved contact}.
     """
     name = domain.optional_text(name)
-    if name is None:
-        return domain.error("invalid_input", "Field 'name' is required.")
+    if name is None and contact_id is None:
+        return domain.error("invalid_input", "Field 'name' is required to create a person.")
     if status is not None and status not in domain.CONTACT_STATUSES:
         return domain.invalid_status(status, domain.CONTACT_STATUSES)
     origin = jobs.parse_source(source)

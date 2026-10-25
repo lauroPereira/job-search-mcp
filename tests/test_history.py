@@ -151,3 +151,37 @@ def test_reads_keep_the_v1_keys_and_add_company_id_and_role_title(connection):
     assert contact["company_id"] == job["company_id"]
     assert contact["job_id"] == 1
     assert contact["role_title"] is None
+
+
+def test_record_changes_refuses_a_changed_reference_field_without_its_id(connection):
+    contact = contacts.get_contact(connection, 7)
+    before = connection.total_changes
+    with pytest.raises(ValueError, match="company"):
+        history.record_changes(
+            connection, "contact", 7, contact, {"company": "Loja Horizonte"}, ON, "user"
+        )
+    assert connection.total_changes == before
+    assert lines(connection, "contact") == []
+    assert version(connection, "contact", 7) == 1
+
+
+def test_record_changes_records_a_reference_by_name_and_stores_its_id(connection):
+    contact = contacts.get_contact(connection, 7)
+    with connection:
+        created = history.record_changes(
+            connection,
+            "contact",
+            7,
+            contact,
+            {"company": "Loja Horizonte", "status": "on_hold"},
+            ON,
+            "user",
+            references={"company": 2},
+        )
+    assert [(line["field"], line["old_value"], line["new_value"]) for line in created] == [
+        ("company", "Consultoria Tangará", "Loja Horizonte"),
+        ("status", "in_conversation", "on_hold"),
+    ]
+    stored = connection.execute("SELECT company_id, status FROM contact WHERE id = 7")
+    assert tuple(stored.fetchone()) == (2, "on_hold")
+    assert version(connection, "contact", 7) == 2

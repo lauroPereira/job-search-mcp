@@ -97,7 +97,7 @@ def duplicate_company(
 
 def plan_save_company(
     connection: sqlite3.Connection,
-    name: str,
+    name: str | None = None,
     company_id: int | None = None,
     sector: str | None = None,
     priority: str | None = None,
@@ -110,16 +110,16 @@ def plan_save_company(
 ) -> domain.Plan | dict:
     """Plan the creation of a company (no `company_id`) or the change of one, writing nothing.
 
-    The name is required and unique by normalized name (db.normalize_name): creating or
-    renaming to the name of another company is the error 'duplicate_company', with that
-    company in the key 'company'. `priority` is one of domain.COMPANY_PRIORITIES. In a
+    The name is required to create and optional in a change. It is unique by normalized
+    name (db.normalize_name): creating or renaming to the name of another company is the
+    error 'duplicate_company', with that company in the key 'company'. `priority` is one of domain.COMPANY_PRIORITIES. In a
     change, fields left as None (or blank) are not touched. `source` and `reference_date`
     go to the history, one line per created or changed field. A change depends on the
     version of the company; applying the plan returns {"company": the saved company}.
     """
     name = domain.optional_text(name)
-    if name is None:
-        return domain.error("invalid_input", "Field 'name' is required.")
+    if name is None and company_id is None:
+        return domain.error("invalid_input", "Field 'name' is required to create a company.")
     if priority is not None and priority not in domain.COMPANY_PRIORITIES:
         return domain.invalid_priority(priority)
     origin = jobs.parse_source(source)
@@ -133,7 +133,7 @@ def plan_save_company(
         current = get_company(connection, company_id)
         if current is None:
             return domain.not_found("company", company_id)
-    duplicate = duplicate_company(connection, name, company_id)
+    duplicate = duplicate_company(connection, name, company_id) if name is not None else None
     if duplicate:
         return duplicate
     informed = {

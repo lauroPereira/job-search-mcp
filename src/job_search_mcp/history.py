@@ -10,7 +10,9 @@ from datetime import date
 
 from job_search_mcp import domain
 
-# The only tables and columns record_changes may write: both go into the UPDATE text.
+# The only tables and fields record_changes may write: both go into the UPDATE text. A field
+# is its column, except the reference fields (REFERENCE_FIELDS): contact.company is written
+# to the column company_id.
 UPDATABLE_FIELDS = {
     "application": ("status", "next_step", "applied_on", "last_contact_on"),
     "contact": (

@@ -166,8 +166,8 @@ def test_tool_parameters_match_the_plan(db_path):
         "changes_list_pending": [],
         "network_list_companies": [],
         "network_company_overview": ["company_id"],
-        "network_save_company": ["name", "source"],
-        "network_save_person": ["name", "source"],
+        "network_save_company": ["source"],
+        "network_save_person": ["source"],
     }
     days_ahead = tools["pending_followups"].input_schema["properties"]["days_ahead"]
     assert days_ahead["type"] == "integer"
@@ -441,7 +441,6 @@ def test_use_case_5_on_hold_takes_the_person_out_of_the_follow_ups(db_path):
     applied = confirmed(
         "network_save_person",
         contact_id=1,
-        name="Ana Exemplo",
         status="on_hold",
         source="conversation",
     )

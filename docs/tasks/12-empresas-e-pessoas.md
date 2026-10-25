@@ -56,9 +56,19 @@ Decisões de desenho:
 - **Nome único.** `duplicate_company` (novo código em `domain.error`) quando outra empresa tem o mesmo nome normalizado, na criação e no renome; renomear a própria empresa só mudando caixa ou acento é permitido. O renome atualiza `normalized_name` junto, sem linha de histórico própria (é derivado de `name`).
 - **Empresa da pessoa por nome.** A prévia e o histórico registram o campo `company` da pessoa pelo nome (como `add_job` faz com a vaga). Para isso `history.record_changes` ganhou `references` e `history.REFERENCE_FIELDS` (`("contact", "company") → company_id`): compara e grava a linha pelo nome e põe o id na coluna, com um único incremento de `version`. Empresa inexistente entra na prévia como criação (`entity: company`, `record_id: null`) e é criada na confirmação com seu histórico.
 - **Campos alteráveis.** `history.UPDATABLE_FIELDS` passou a incluir `company` (`name`, `sector`, `priority`, `job_platform`, `notes`) e, em `contact`, `name`, `company`, `role_title`, `relationship`, `channel`. `test_history.py` usava `name` como campo proibido de `contact`; passou a usar `job_id`.
-- **Alteração parcial.** Campo `None` ou só espaços não é tocado (`domain.optional_text`); por isso esta versão não limpa campos (não há como voltar `sector` a null). `name` é obrigatório também na alteração, como no plano; informar o nome atual não gera mudança. Pessoa nova sem status começa em `to_contact`.
+- **Alteração parcial.** Campo `None` ou só espaços não é tocado (`domain.optional_text`); por isso esta versão não limpa campos (não há como voltar `sector` a null). `name` é obrigatório só na criação (sem `company_id`/`contact_id`); na alteração é opcional, e informar o nome atual não gera mudança (ver achado 3). Pessoa nova sem status começa em `to_contact`.
 - **`jobs._changed_on` virou `jobs.parse_reference_date`**, pública, para ser reutilizada pelos planejadores novos.
 - **Contrato das ferramentas existentes inalterado**; só as `instructions` do servidor e a descrição de `changes_confirm` citam as ferramentas novas.
+
+Achados da revisão (PR 21, parecer apto, só achados baixos), tratados na mesma branch:
+
+| # | Severidade | Achado | Decisão |
+|---|---|---|---|
+| 1 | Baixa | O comentário de `history.UPDATABLE_FIELDS` dizia que os campos são as colunas, mas `contact.company` é gravado em `company_id`. | Corrigido: o comentário cita `REFERENCE_FIELDS` e o mapeamento `contact.company` → `company_id`. |
+| 2 | Baixa | O ramo `references` de `history.record_changes` só era testado indiretamente. | Corrigido: dois testes em `test_history.py`, um com `ValueError` sem o id (nada gravado, `version` inalterada) e outro com o nome no histórico, o id na coluna e um único incremento de `version`. |
+| 3 | Baixa | `name` obrigatório na alteração obrigava a reenviar o nome para, por exemplo, pôr a pessoa em `on_hold` (caso de uso 5). | Corrigido: em `network_save_company` e `network_save_person`, `name` é obrigatório só na criação; a falta dele na criação é `invalid_input`. Os parâmetros obrigatórios das duas ferramentas passam a ser só `source`. As descrições e os testes (caso de uso 5 sem nome, alterações parciais sem nome, criação sem nome recusada) foram atualizados. São ferramentas novas, ainda não publicadas, sem impacto de contrato. |
+
+Depois das correções: `.venv\Scripts\python.exe tools/scripts/lint_and_tests.py --strict` com `268 passed`, `All checks passed!` e `ruff format --check src tests` sem diferenças.
 
 Pendências: limpar um campo opcional (voltar a null) não é possível pelas ferramentas novas; README e `docs/case.md` ficam para a tarefa 16, com as notas da versão.
 

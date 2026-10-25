@@ -323,7 +323,7 @@ def test_save_person_finds_the_company_by_normalized_name(connection):
 
 def test_save_person_changes_only_the_informed_fields(connection):
     before = contacts.get_contact(connection, 2)
-    plan = save_person(connection, contact_id=2, name="Bruno Modelo", role_title="Tech Recruiter")
+    plan = save_person(connection, contact_id=2, role_title="Tech Recruiter")
     assert plan.base_versions == {"contact:2": 1}
     assert [(c["field"], c["old_value"], c["new_value"]) for c in plan.changes] == [
         ("role_title", None, "Tech Recruiter")
@@ -347,9 +347,7 @@ def test_save_person_moves_the_person_to_another_company_recorded_by_name(connec
 def test_save_person_on_hold_leaves_the_follow_ups(connection, reference_date):
     pending = summary.pending_followups(connection, reference_date)
     assert 1 in [contact["id"] for contact in pending["contacts"]]
-    contact = write(
-        connection, save_person(connection, contact_id=1, name="Ana Exemplo", status="on_hold")
-    )["contact"]
+    contact = write(connection, save_person(connection, contact_id=1, status="on_hold"))["contact"]
     assert (contact["status"], contact["follow_up"]) == ("on_hold", None)
     pending = summary.pending_followups(connection, reference_date)
     assert 1 not in [contact["id"] for contact in pending["contacts"]]
@@ -357,6 +355,7 @@ def test_save_person_on_hold_leaves_the_follow_ups(connection, reference_date):
 
 def test_save_person_validation_errors(connection):
     assert save_person(connection, name=" ")["error"] == "invalid_input"
+    assert save_person(connection, role_title="CTO")["error"] == "invalid_input"
     assert save_person(connection, name="X", status="ghosted")["error"] == "invalid_status"
     assert save_person(connection, name="X", contact_id=99)["error"] == "not_found"
     assert save_person(connection, name="X", source="")["error"] == "invalid_input"

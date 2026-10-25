@@ -313,11 +313,16 @@ def network_company_overview(
 
 @mcp.tool
 def network_save_company(
-    name: Annotated[
-        str,
-        Field(description="Name of the company; unique, ignoring case, accents and spaces."),
-    ],
     source: Annotated[str, Field(description=SOURCE_HELP)],
+    name: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Name of the company; unique, ignoring case, accents and spaces. Required to "
+                "create; in a change, leave it out to keep the current name."
+            )
+        ),
+    ] = None,
     company_id: Annotated[
         int | None,
         Field(description="Id of the company to change; leave it out to create a company."),
@@ -358,8 +363,16 @@ def network_save_company(
 
 @mcp.tool
 def network_save_person(
-    name: Annotated[str, Field(description="Name of the person.")],
     source: Annotated[str, Field(description=SOURCE_HELP)],
+    name: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Name of the person. Required to create; in a change, leave it out to keep "
+                "the current name."
+            )
+        ),
+    ] = None,
     contact_id: Annotated[
         int | None,
         Field(
