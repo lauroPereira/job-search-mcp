@@ -104,8 +104,8 @@ def error(code: str, detail: str, **extra) -> dict:
 
     `error` is a stable code (invalid_status, duplicate_url, not_found, invalid_date,
     invalid_input, stale_proposal, expired_proposal, duplicate_company, duplicate_link,
-    duplicate_stage) and `detail` a message the agent can relay. Extra keys carry context, such as the valid statuses or
-    the existing job.
+    duplicate_stage) and `detail` a message the agent can relay. Extra keys carry context,
+    such as the valid statuses or the existing job.
     """
     return {"error": code, "detail": detail, **extra}
 
