@@ -465,9 +465,10 @@ def jobs_add_stage(
     proposal. A stage of the same kind on the same date is the error 'duplicate_stage'
     (with the existing stage in 'stage'). The proposal holds the stage and, when
     informed, the new status of the application; when the stage is more recent than the
-    last contact of the job, the last contact moves to the stage date; a job that becomes 'applied' without an application
-    date gets the stage date. Once confirmed, changes_confirm returns {"stage",
-    "job": the updated job, "history": the history lines of the job}.
+    last contact of the job, the last contact moves to the stage date; a job that
+    becomes 'applied' without an application date gets the stage date. Once confirmed,
+    changes_confirm returns {"stage", "job": the updated job, "history": the history
+    lines of the job}.
     """
     stage_date = past_date("date", date)
     if domain.is_error(stage_date):
