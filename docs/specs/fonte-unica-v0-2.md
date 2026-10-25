@@ -1,6 +1,6 @@
 # Especificação: fonte única (v0.2)
 
-Status: **aceita para planejamento** em 2026-10-25 (decisão D2 do [modelo de domínios](modelo-de-dominios.md)). Evolui o [servidor MCP](servidor-mcp-busca-de-emprego.md) da `v0.1.0`.
+Status: **aceita para planejamento** em 2026-10-25 (decisão D2 do [modelo de domínios](modelo-de-dominios.md)). Plano: [`fonte-unica-v0-2-plano.md`](fonte-unica-v0-2-plano.md). Evolui o [servidor MCP](servidor-mcp-busca-de-emprego.md) da `v0.1.0`.
 
 ## Problema
 
