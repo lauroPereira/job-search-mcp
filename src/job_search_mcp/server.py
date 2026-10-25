@@ -255,6 +255,17 @@ def daily_summary(
 
 def seed_database() -> str | None:
     """Load the synthetic demo data into a new database; return a message when it is refused."""
+    # Checked before the database is opened: missing demo data is not a JOB_SEARCH_DB problem,
+    # and no empty database file is left behind.
+    for name in ("jobs.csv", "contacts.csv"):
+        try:
+            (db.SEED_DIR / name).open(encoding="utf-8").close()
+        except OSError as failure:
+            return (
+                f"Could not read the demo data in {db.SEED_DIR}: {failure}. The demo data "
+                "comes with the repository (data/seed/): install from a clone, with "
+                "pip install -e ."
+            )
     with open_database() as connection:
         for table in ("job", "contact", "interaction", "job_history"):
             if connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():

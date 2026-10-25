@@ -131,7 +131,7 @@ Aplicadas em 2026-10-10, no mesmo ambiente, como commits novos na branch `feat/0
 | Ressalva | Correção |
 |---|---|
 | O teste de fechamento de conexão passava mesmo sem o fechamento: a ferramenta roda em outra thread, e o erro esperado vinha da regra de thread do sqlite, não da conexão fechada. | Reescrito como `test_tools_close_the_connection_on_success_business_error_and_exception`: as conexões são abertas com uma subclasse de `sqlite3.Connection` (passada como `factory`) que registra cada chamada a `close()`. O teste confere, depois de cada chamada, que o número de conexões abertas e o de fechadas são iguais, em três caminhos: sucesso (`list_jobs`), erro de negócio (`list_jobs` com status inválido) e exceção inesperada no domínio (`RuntimeError`). |
-| `track` e `score` de `add_job` não eram validados. | Validação no domínio (`domain.JOB_TRACKS`, `domain.SCORE_MIN`, `domain.SCORE_MAX`, `domain.is_valid_score`, usados por `jobs.add_job`): `track` ausente ou um de `data`, `systems`, `product`, `ai`, `other`; `score` ausente ou número de 0 a 10 (limites incluídos; booleano, texto, NaN e infinito são recusados). Fora disso nada é criado e o retorno é o erro estruturado `invalid_input`; no caso de `track`, com a lista em `valid_tracks`. A validação vale só para o cadastro: `list_jobs` continua aceitando qualquer `track` e `min_score` como filtro. |
+| `track` e `score` de `add_job` não eram validados. | Validação no domínio (`domain.JOB_TRACKS`, `domain.SCORE_MIN`, `domain.SCORE_MAX`, `domain.is_valid_score`, usados por `jobs.add_job`): `track` ausente ou um de `data`, `systems`, `product`, `ai`, `other`; `score` ausente ou número de 0 a 10 (limites incluídos; a função de domínio recusa booleano, texto, NaN e infinito). Pela ferramenta, o parâmetro é `float | None` e o pacote converte o argumento antes de chamar o domínio: `score=true` chega como 1.0 e `score="8"` como 8.0, e são aceitos; texto que não converte (`"abc"`) é recusado pelo pacote como erro de protocolo em texto; `"nan"` converte para NaN e é recusado pelo domínio (nota acrescentada na tarefa 08, que registra a decisão pendente sobre validação estrita). Fora disso nada é criado e o retorno é o erro estruturado `invalid_input`; no caso de `track`, com a lista em `valid_tracks`. A validação vale só para o cadastro: `list_jobs` continua aceitando qualquer `track` e `min_score` como filtro. |
 | `--seed` terminava com traceback quando o caminho do banco não podia ser usado. | `main` trata `OSError` e `sqlite3.Error`: uma linha na saída de erro (`Could not load the demo data into <caminho>: <motivo>. Check the path in JOB_SEARCH_DB.`) e código de saída 1. |
 | Faltava teste do `readOnlyHint` e do executável instalado. | `test_only_the_four_query_tools_carry_the_read_only_hint` (as quatro ferramentas de consulta têm a anotação verdadeira; as três de escrita não têm anotação) e `test_installed_entry_point_seeds_and_serves` (roda o executável `job-search-mcp` do `[project.scripts]`: `--seed` em banco novo, `--seed` com um diretório no lugar do arquivo, e o servidor por stdio com uma chamada a `daily_summary`). |
 
@@ -162,9 +162,11 @@ O teste antigo passava nas duas situações.
 
 ### CI do pull request
 
-Pull request #8 (commit `3bcfac0`): `gh pr checks 8` devolveu `validate pass 27s`.
+Pull request #8 (commit `f697f95`): `gh pr checks 8` devolveu `validate pass 27s`.
 
-Depois das correções da revisão (commit `d3c4e70`): `gh pr checks 8` devolveu `validate pass 28s`. No log da execução, em Ubuntu: `151 passed in 7.64s`, nenhum teste pulado (o teste do executável instalado rodou também no CI), `All checks passed!` e `Validação estrita concluída sem falhas.`
+Depois das correções da revisão (commit `93c539e`): `gh pr checks 8` devolveu `validate pass 28s`. No log da execução, em Ubuntu: `151 passed in 7.64s`, nenhum teste pulado (o teste do executável instalado rodou também no CI), `All checks passed!` e `Validação estrita concluída sem falhas.`
+
+Os SHAs citados aqui são os atuais: o histórico de `develop` foi reescrito em 2026-10-10 para corrigir o e-mail de autor dos commits de merge, sem alterar o conteúdo, e os SHAs originais deixaram de existir em `develop` (correspondência em `docs/tasks/08-ajustes-da-revisao-06-07.md`).
 
 ### Limitações
 

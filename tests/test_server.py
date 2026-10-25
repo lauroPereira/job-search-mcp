@@ -397,6 +397,24 @@ def test_seed_option_reports_an_unusable_path_without_a_traceback(tmp_path, monk
     assert sorted(item.name for item in tmp_path.iterdir()) == ["not_a_directory"]
 
 
+def test_seed_option_reports_missing_demo_data_without_blaming_the_database_path(
+    tmp_path, monkeypatch, capsys
+):
+    path = tmp_path / "demo.db"
+    empty_seed_dir = tmp_path / "seed"
+    empty_seed_dir.mkdir()
+    monkeypatch.setenv(db.DB_ENV_VAR, str(path))
+    monkeypatch.setattr(db, "SEED_DIR", empty_seed_dir)
+    assert server.main(["--seed"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err.startswith("Could not read the demo data in")
+    assert len(captured.err.strip().splitlines()) == 1
+    assert "jobs.csv" in captured.err
+    assert db.DB_ENV_VAR not in captured.err
+    assert not path.exists()  # no empty database file is left behind
+
+
 def installed_entry_point():
     """The `job-search-mcp` executable of this environment, in the interpreter's scripts."""
     executable = shutil.which("job-search-mcp", path=sysconfig.get_path("scripts"))
