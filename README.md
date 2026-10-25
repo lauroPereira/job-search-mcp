@@ -10,6 +10,8 @@ Durante uma recolocação profissional, usei agentes de IA todos os dias para ac
 
 Este servidor transforma aquele controle em ferramentas que qualquer cliente MCP (Claude Code, Claude Desktop e outros) consegue chamar: o agente consulta e atualiza o estado em vez de reinterpretar planilhas.
 
+O case completo, com arquitetura, guardrails, avaliação, custo e o que deu errado, está em [O que construí com IA](docs/case.md).
+
 ## Arquitetura
 
 ```mermaid
