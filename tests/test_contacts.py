@@ -360,3 +360,39 @@ def test_save_person_validation_errors(connection):
     assert save_person(connection, name="X", contact_id=99)["error"] == "not_found"
     assert save_person(connection, name="X", source="")["error"] == "invalid_input"
     assert save_person(connection, name="X", reference_date="x")["error"] == "invalid_date"
+
+
+def link(connection, job_id, contact_id, role):
+    plan = jobs.plan_link_person(
+        connection, job_id, contact_id, role, source="user", reference_date="2026-03-16"
+    )
+    return write(connection, plan)
+
+
+def test_log_interaction_updates_every_active_application_of_the_person(connection):
+    link(connection, 3, 1, "referrer")  # active, in_review
+    link(connection, 13, 1, "recruiter")  # rejected: closed, not updated
+    link(connection, 1, 1, "referrer")  # same job in a second role: listed once
+    plan = contacts.plan_log_interaction(connection, 1, "Conversa sobre as vagas", "2026-03-15")
+    assert plan.base_versions == {"contact:1": 1, "application:1": 1, "application:3": 1}
+    assert [(c["entity"], c["record_id"], c["field"]) for c in plan.changes][-2:] == [
+        ("application", 1, "last_contact_on"),
+        ("application", 3, "last_contact_on"),
+    ]
+    result = write(connection, plan)
+    assert result["job"] is None
+    assert [(job["id"], job["last_contact_on"]) for job in result["jobs"]] == [
+        (1, "2026-03-15"),
+        (3, "2026-03-15"),
+        (13, "2026-02-25"),
+    ]
+    assert [(line["record_id"], line["new_value"]) for line in job_history(connection)] == [
+        (1, "2026-03-15"),
+        (3, "2026-03-15"),
+    ]
+
+
+def test_log_interaction_with_a_person_without_jobs_returns_an_empty_list(connection):
+    result = write(connection, contacts.plan_log_interaction(connection, 7, "Café", "2026-03-15"))
+    assert result["job"] is None
+    assert result["jobs"] == []

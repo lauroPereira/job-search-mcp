@@ -74,7 +74,7 @@ def company_overview(
     return {
         "company": company,
         "people": [contacts.contact_to_dict(row, settings) for row in people],
-        "applications": [jobs.job_to_dict(row, settings) for row in applications],
+        "applications": jobs.jobs_from_rows(connection, applications.fetchall(), settings),
     }
 
 

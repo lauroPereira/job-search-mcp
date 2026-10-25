@@ -20,6 +20,8 @@ TOOL_NAMES = [
     "changes_discard",
     "changes_list_pending",
     "daily_summary",
+    "jobs_add_stage",
+    "jobs_link_person",
     "list_contacts",
     "list_jobs",
     "log_interaction",
@@ -104,7 +106,7 @@ def rows(path, query):
         connection.close()
 
 
-def test_server_lists_exactly_the_fourteen_tools(db_path):
+def test_server_lists_exactly_the_sixteen_tools(db_path):
     tools = run(lambda client: client.list_tools())
     assert sorted(tool.name for tool in tools) == TOOL_NAMES
     assert server.mcp.name == "job-search"
@@ -151,6 +153,16 @@ def test_tool_parameters_match_the_plan(db_path):
             "source",
             "status",
         ],
+        "jobs_add_stage": [
+            "date",
+            "feedback",
+            "job_id",
+            "kind",
+            "result",
+            "source",
+            "status",
+        ],
+        "jobs_link_person": ["confirmed", "contact_id", "job_id", "role", "source"],
     }
     required = {name: sorted(tool.input_schema.get("required", [])) for name, tool in tools.items()}
     assert required == {
@@ -168,6 +180,8 @@ def test_tool_parameters_match_the_plan(db_path):
         "network_company_overview": ["company_id"],
         "network_save_company": ["source"],
         "network_save_person": ["source"],
+        "jobs_add_stage": ["date", "job_id", "kind", "source"],
+        "jobs_link_person": ["contact_id", "job_id", "role", "source"],
     }
     days_ahead = tools["pending_followups"].input_schema["properties"]["days_ahead"]
     assert days_ahead["type"] == "integer"
@@ -194,6 +208,8 @@ def test_only_the_query_tools_carry_the_read_only_hint(db_path):
         "network_company_overview": True,
         "network_save_company": None,
         "network_save_person": None,
+        "jobs_add_stage": None,
+        "jobs_link_person": None,
     }
 
 
@@ -388,6 +404,26 @@ WRITES = (
         "network_save_person",
         {"contact_id": 7, "name": "Gabriela Ensaio", "source": "user", "status": "on_hold"},
     ),
+    (
+        "jobs_add_stage",
+        {"job_id": 4, "kind": "technical", "date": "2026-03-16", "source": "conversation"},
+    ),
+    (
+        "jobs_add_stage",
+        {
+            "job_id": 4,
+            "kind": "hr",
+            "date": "2026-03-12",
+            "result": "passed",
+            "status": "tech_interview",
+            "source": "user",
+        },
+    ),
+    ("jobs_link_person", {"job_id": 9, "contact_id": 7, "role": "referrer", "source": "user"}),
+    (
+        "jobs_link_person",
+        {"job_id": 1, "contact_id": 2, "role": "recruiter", "confirmed": True, "source": "user"},
+    ),
 )
 
 
@@ -418,6 +454,196 @@ def test_write_tools_only_propose_and_changes_confirm_applies(db_path, name, arg
     again = structured("changes_confirm", proposal_id=proposal["id"])
     assert again["error"] == "not_found"
     assert again["status"] == "applied"
+
+
+def test_use_case_2_records_a_stage_and_the_new_status_from_the_conversation(db_path):
+    """ "Fiz a entrevista técnica hoje, foi bem, aguardo retorno", on the seed job 4."""
+    before = snapshot(db_path)
+    proposal = structured(
+        "jobs_add_stage",
+        job_id=4,
+        kind="technical",
+        date="2026-03-16",
+        feedback="Foi bem, aguardo retorno",
+        status="tech_interview",
+        source="conversation",
+    )["proposal"]
+    assert snapshot(db_path) == before
+    assert [
+        (change["entity"], change["field"], change["old_value"], change["new_value"])
+        for change in proposal["changes"]
+    ] == [
+        ("application_stage", "application_id", None, 4),
+        ("application_stage", "kind", None, "technical"),
+        ("application_stage", "date", None, "2026-03-16"),
+        ("application_stage", "result", None, "pending"),
+        ("application_stage", "feedback", None, "Foi bem, aguardo retorno"),
+        ("application", "status", "hr_interview", "tech_interview"),
+        ("application", "last_contact_on", "2026-03-13", "2026-03-16"),
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["stage"] == {
+        "id": 1,
+        "kind": "technical",
+        "date": "2026-03-16",
+        "result": "pending",
+        "feedback": "Foi bem, aguardo retorno",
+    }
+    assert applied["job"]["status"] == "tech_interview"
+    assert [line["field"] for line in applied["history"]] == ["status", "last_contact_on"]
+    listed = structured("list_jobs", status="tech_interview")["jobs"]
+    job = next(item for item in listed if item["id"] == 4)
+    assert job["stages"] == [applied["stage"]]
+    assert job["last_contact_on"] == "2026-03-16"
+    assert rows(db_path, "SELECT DISTINCT entity, source_type FROM history ORDER BY entity") == [
+        ("application", "conversation"),
+        ("application_stage", "conversation"),
+    ]
+
+
+def test_use_case_3_a_refused_proposal_changes_nothing(db_path):
+    """The agent proposes 'referred' for a contact; the user refuses."""
+    before = snapshot(db_path)
+    proposal = structured(
+        "network_save_person", contact_id=1, status="referred", source="conversation"
+    )["proposal"]
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in proposal["changes"]] == [
+        ("status", "awaiting_reply", "referred")
+    ]
+    assert structured("changes_discard", proposal_id=proposal["id"])["proposal"]["status"] == (
+        "discarded"
+    )
+    assert snapshot(db_path) == before
+    assert structured("changes_confirm", proposal_id=proposal["id"])["error"] == "not_found"
+    assert snapshot(db_path) == before
+    assert structured("list_contacts", status="referred")["contacts"][0]["id"] == 4
+
+
+def test_jobs_add_stage_refuses_future_dates_and_invalid_values(db_path):
+    before = snapshot(db_path)
+    stage = {"job_id": 4, "source": "user"}
+    future = structured("jobs_add_stage", **stage, kind="technical", date="2026-03-17")
+    assert future["error"] == "invalid_date"
+    assert "after today" in future["detail"]
+    assert structured("jobs_add_stage", **stage, kind="hr", date="ontem")["error"] == (
+        "invalid_date"
+    )
+    kind = structured("jobs_add_stage", **stage, kind="lunch", date="2026-03-16")
+    assert kind["error"] == "invalid_input"
+    assert kind["valid_values"] == [
+        "screening", "test", "culture_fit", "hr", "technical", "manager", "offer"
+    ]  # fmt: skip
+    result = structured("jobs_add_stage", **stage, kind="hr", date="2026-03-16", result="ok")
+    assert result["valid_values"] == ["pending", "passed", "failed", "cancelled"]
+    status = structured("jobs_add_stage", **stage, kind="hr", date="2026-03-16", status="x")
+    assert status["error"] == "invalid_status"
+    assert (
+        structured("jobs_add_stage", job_id=99, kind="hr", date="2026-03-16", source="user")[
+            "error"
+        ]
+        == "not_found"
+    )
+    assert structured("changes_list_pending") == {"proposals": []}
+    assert snapshot(db_path) == before
+
+
+def test_jobs_link_person_refuses_a_repeated_link_and_confirms_an_existing_one(db_path):
+    link = {"job_id": 3, "contact_id": 7, "role": "referrer", "source": "conversation"}
+    assert structured("list_jobs", status="in_review")["jobs"][0]["priority"] == "medium"
+    created = confirmed("jobs_link_person", **link)
+    assert created["link"] == {
+        "job_id": 3,
+        "contact_id": 7,
+        "name": "Gabriela Ensaio",
+        "role": "referrer",
+        "confirmed": False,
+    }
+    assert created["job"]["people"] == [
+        {"id": 7, "name": "Gabriela Ensaio", "role": "referrer", "confirmed": False}
+    ]
+    assert created["job"]["priority"] == "medium"  # score 7.0, referral not confirmed
+    before = snapshot(db_path)
+    repeated = structured("jobs_link_person", **link)
+    assert repeated["error"] == "duplicate_link"
+    assert repeated["link"]["confirmed"] is False
+    assert structured("jobs_link_person", **link, confirmed=False)["error"] == "duplicate_link"
+    bad_role = structured("jobs_link_person", **{**link, "role": "friend"})
+    assert bad_role["error"] == "invalid_input"
+    assert structured("jobs_link_person", **{**link, "contact_id": 99})["error"] == "not_found"
+    assert snapshot(db_path) == before
+
+    proposal = structured("jobs_link_person", **link, confirmed=True)["proposal"]
+    assert proposal["changes"] == [
+        {
+            "entity": "application_person",
+            "record_id": 3,
+            "field": "link",
+            "old_value": "Gabriela Ensaio (contact 7) as referrer, not confirmed",
+            "new_value": "Gabriela Ensaio (contact 7) as referrer, confirmed",
+        }
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["link"]["confirmed"] is True
+    assert applied["job"]["priority"] == "high"
+    assert structured("jobs_link_person", **link, confirmed=True)["error"] == "duplicate_link"
+    assert rows(
+        db_path,
+        "SELECT entity, record_id, field, old_value, new_value, source_type FROM history",
+    ) == [
+        (
+            "application_person",
+            3,
+            "link",
+            None,
+            "contact_id=7;role=referrer;confirmed=0",
+            "conversation",
+        ),
+        (
+            "application_person",
+            3,
+            "link",
+            "contact_id=7;role=referrer;confirmed=0",
+            "contact_id=7;role=referrer;confirmed=1",
+            "conversation",
+        ),
+    ]
+
+
+def test_log_interaction_updates_every_active_job_of_the_person(db_path):
+    assert "error" not in confirmed(
+        "jobs_link_person", job_id=3, contact_id=1, role="referrer", confirmed=True, source="user"
+    )
+    result = confirmed("log_interaction", contact_id=1, summary="Conversa sobre as duas vagas")
+    assert sorted(result) == ["contact", "follow_up", "job", "jobs"]
+    assert result["job"] is None  # linked to two jobs
+    assert [(job["id"], job["last_contact_on"]) for job in result["jobs"]] == [
+        (1, "2026-03-16"),
+        (3, "2026-03-16"),
+    ]
+    single = confirmed("log_interaction", contact_id=2, summary="Combinou horários")
+    assert single["job"]["id"] == 2
+    assert [job["id"] for job in single["jobs"]] == [2]
+
+
+def test_two_equal_stage_proposals_apply_only_once(db_path):
+    stage = {"job_id": 4, "kind": "hr", "date": "2026-03-14", "source": "user"}
+    first = structured("jobs_add_stage", **stage)["proposal"]
+    second = structured("jobs_add_stage", **stage)["proposal"]
+    assert "error" not in structured("changes_confirm", proposal_id=first["id"])
+    assert structured("changes_confirm", proposal_id=second["id"])["error"] == "stale_proposal"
+    duplicate = structured("jobs_add_stage", **stage)
+    assert duplicate["error"] == "duplicate_stage"
+    assert duplicate["stage"]["date"] == "2026-03-14"
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage") == [(1,)]
+
+
+def test_stage_proposal_is_stale_when_the_application_changes(db_path):
+    stage = structured("jobs_add_stage", job_id=4, kind="hr", date="2026-03-14", source="user")[
+        "proposal"
+    ]
+    assert "error" not in confirmed("update_job", job_id=4, source="user", next_step="Outro")
+    assert structured("changes_confirm", proposal_id=stage["id"])["error"] == "stale_proposal"
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage") == [(0,)]
 
 
 def test_use_case_4_who_the_user_knows_at_a_company(db_path):

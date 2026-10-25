@@ -26,6 +26,8 @@ PLANNERS = {
     "log_interaction": contacts.plan_log_interaction,
     "network_save_company": companies.plan_save_company,
     "network_save_person": contacts.plan_save_person,
+    "jobs_add_stage": jobs.plan_add_stage,
+    "jobs_link_person": jobs.plan_link_person,
 }
 PENDING = "pending"
 # What arguments and preview hold once a proposal can no longer be applied (the columns are

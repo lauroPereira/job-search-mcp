@@ -169,6 +169,24 @@ def record_changes(
     return _insert_lines(connection, lines, record_id, changed_on, source_type, source_ref)
 
 
+def record_lines(
+    connection: sqlite3.Connection,
+    lines: list[dict],
+    record_id: int,
+    changed_on: date,
+    source_type: str,
+    source_ref: str | None = None,
+) -> list[dict]:
+    """Write preview lines as they are (see change), all for the record `record_id`.
+
+    For records that have no `version` and no column to update, such as the link of a
+    person to an application. Does not commit. An unknown source type raises ValueError
+    before anything is written.
+    """
+    _check_source(source_type)
+    return _insert_lines(connection, lines, record_id, changed_on, source_type, source_ref)
+
+
 def record_creation(
     connection: sqlite3.Connection,
     entity: str,

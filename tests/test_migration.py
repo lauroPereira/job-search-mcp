@@ -216,7 +216,15 @@ def test_migrated_interactions_keep_their_data_and_gain_empty_columns(migrated):
 
 
 def test_migrated_reads_match_a_new_database_with_the_same_seed(migrated, fresh):
-    assert jobs.list_jobs(migrated) == jobs.list_jobs(fresh)
+    def without_people(listed):
+        return [{key: value for key, value in job.items() if key != "people"} for job in listed]
+
+    # The v0.1.0 fixture has one extra person (Igor Variante), linked to job 1.
+    assert without_people(jobs.list_jobs(migrated)) == without_people(jobs.list_jobs(fresh))
+    assert [person["name"] for person in jobs.get_job(migrated, 1)["people"]] == [
+        "Ana Exemplo",
+        "Igor Variante",
+    ]
     assert contacts.list_contacts(migrated)[:8] == contacts.list_contacts(fresh)
 
 
