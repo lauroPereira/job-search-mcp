@@ -42,7 +42,11 @@ def today() -> datetime.date:
 
 @contextmanager
 def open_database() -> Iterator:
-    """Open the configured database with the schema in place and always close it."""
+    """Open the configured database with the schema in place and always close it.
+
+    A database of v0.1.0 is migrated to the current schema on the first opening (see
+    db.create_schema).
+    """
     connection = db.connect()
     try:
         db.create_schema(connection)
@@ -87,8 +91,8 @@ def list_jobs(
     """List the registered jobs, ordered by id, optionally filtered.
 
     Returns {"jobs": [...]}. Each job has id, company, title, url, track, score, status,
-    next_step, applied_on, last_contact_on, created_at and the calculated follow_up date
-    (null when the status does not generate a follow-up).
+    next_step, applied_on, last_contact_on, created_at, company_id and the calculated
+    follow_up date (null when the status does not generate a follow-up).
     """
     with open_database() as connection:
         result = jobs.list_jobs(
@@ -182,14 +186,21 @@ def list_contacts(
         Field(description=f"Keep only contacts in this status. {CONTACT_STATUS_HELP}"),
     ] = None,
     company: Annotated[
-        str | None, Field(description="Keep only contacts of this company (whole name).")
+        str | None,
+        Field(
+            description=(
+                "Keep only contacts of this company (whole name; case, accents and extra "
+                "spaces are ignored)."
+            )
+        ),
     ] = None,
 ) -> dict[str, Any]:
     """List the networking contacts, ordered by id, optionally filtered.
 
     Returns {"contacts": [...]}. Each contact has id, name, company, relationship, channel,
-    status, next_step, last_contact_on, job_id (the linked job, or null) and the calculated
-    follow_up date (null when the status does not generate a follow-up).
+    status, next_step, last_contact_on, job_id (the linked job, or null), company_id,
+    role_title and the calculated follow_up date (null when the status does not generate a
+    follow-up).
     """
     with open_database() as connection:
         result = contacts.list_contacts(
@@ -307,7 +318,7 @@ def seed_database() -> str | None:
                 "pip install -e ."
             )
     with open_database() as connection:
-        for table in ("job", "contact", "interaction", "job_history"):
+        for table in ("company", "job", "contact", "interaction", "history"):
             if connection.execute(f"SELECT 1 FROM {table} LIMIT 1").fetchone():
                 return (
                     f"Refused: the database at {db.default_db_path()} already has data. "

@@ -87,6 +87,7 @@ def test_daily_summary_counts_match_the_seed(connection, reference_date):
         "tech_interview": 1,
         "manager_interview": 1,
         "offer": 1,
+        "on_hold": 0,
         "hired": 1,
         "rejected": 1,
         "withdrawn": 1,

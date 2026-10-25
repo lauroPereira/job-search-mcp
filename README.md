@@ -51,9 +51,9 @@ Datas são texto no formato ISO 8601 (`AAAA-MM-DD`). Parâmetros com `?` são op
 Regras principais:
 
 - **Follow-up de vaga:** data do último contato mais 7 dias; sem contato, data da candidatura mais 7 dias. **Follow-up de contato:** data da última interação mais 6 dias.
-- Vagas e contatos em status encerrado, ou que ainda não começaram, não geram follow-up.
-- **Status de vaga:** `suggested`, `to_apply`, `blocked`, `applied`, `in_review`, `hr_interview`, `tech_interview`, `manager_interview`, `offer`, `hired`, `rejected`, `withdrawn`, `closed`.
-- **Status de contato:** `to_contact`, `awaiting_reply`, `in_conversation`, `resume_sent`, `referred`, `closed`.
+- Vagas e contatos em status encerrado, ou que ainda não começaram, não geram follow-up. `on_hold` (em espera) também não gera follow-up, mas o registro continua ativo.
+- **Status de vaga:** `suggested`, `to_apply`, `blocked`, `applied`, `in_review`, `hr_interview`, `tech_interview`, `manager_interview`, `offer`, `on_hold`, `hired`, `rejected`, `withdrawn`, `closed`.
+- **Status de contato:** `to_contact`, `awaiting_reply`, `in_conversation`, `resume_sent`, `referred`, `on_hold`, `closed`.
 - **Trilha e nota no cadastro:** em `add_job`, `track` é opcional e, quando informado, deve ser um de `data`, `systems`, `product`, `ai`, `other`; `score` é opcional e, quando informado, deve ser um número de 0 a 10. Fora disso, nada é criado e o retorno é o erro `invalid_input` (no caso de `track`, com a lista em `valid_tracks`).
 - **Erros de negócio** voltam como um objeto com `error` (código) e `detail` (mensagem), para o agente explicar o que houve. Os códigos são `duplicate_url` (link já cadastrado), `invalid_status`, `invalid_date` (data inválida ou futura), `invalid_input` (campo obrigatório vazio, `track` ou `score` fora da faixa, `days_ahead` negativo) e `not_found` (registro inexistente).
 

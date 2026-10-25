@@ -1,17 +1,38 @@
-"""Contact operations: list contacts and log interactions, keeping the linked job in step."""
+"""Contact operations: list contacts and log interactions, keeping the linked job in step.
+
+A contact is read with its company and keeps the keys of v0.1.0: `company` is the name of
+the company and `job_id` the job of the first application the person is linked to with the
+role 'contact' (null when there is none). `company_id` and `role_title` are additive.
+"""
 
 import datetime
 import sqlite3
 
-from job_search_mcp import domain, jobs
+from job_search_mcp import db, domain, history, jobs
 from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
-# Source written in job_history when an interaction moves the last contact date of a job.
+# Origin written in the history for the changes an interaction makes (contact and job).
+INTERACTION_SOURCE_TYPE = domain.USER_SOURCE
 INTERACTION_SOURCE = "contact_interaction"
 # The first logged conversation takes a contact out of "to contact", so it gets a follow-up.
 NOT_CONTACTED_STATUS = "to_contact"
 FIRST_INTERACTION_STATUS = "awaiting_reply"
+
+# Contact and company joined, with the keys (and their order) of v0.1.0.
+CONTACT_SELECT = """
+SELECT contact.id, contact.name, company.name AS company, contact.relationship,
+    contact.channel, contact.status, contact.next_step, contact.last_contact_on,
+    (
+        SELECT application.job_id FROM application_person
+        JOIN application ON application.id = application_person.application_id
+        WHERE application_person.contact_id = contact.id AND application_person.role = 'contact'
+        ORDER BY application.id LIMIT 1
+    ) AS job_id,
+    contact.company_id, contact.role_title
+FROM contact
+LEFT JOIN company ON company.id = contact.company_id
+"""
 
 
 def contact_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
@@ -29,7 +50,7 @@ def contact_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
 def get_contact(
     connection: sqlite3.Connection, contact_id: int, settings: Settings | None = None
 ) -> dict | None:
-    row = connection.execute("SELECT * FROM contact WHERE id = ?", (contact_id,)).fetchone()
+    row = connection.execute(f"{CONTACT_SELECT} WHERE contact.id = ?", (contact_id,)).fetchone()
     return contact_to_dict(row, settings) if row else None
 
 
@@ -41,17 +62,21 @@ def list_contacts(
 ) -> list[dict] | dict:
     """List contacts ordered by id, optionally filtered by status and company.
 
-    The company filter matches the whole name, ignoring case for unaccented letters.
+    The company filter matches the whole name, compared by normalized name (db.normalize_name:
+    case, accents and extra spaces are ignored).
     """
     if status is not None and status not in domain.CONTACT_STATUSES:
         return domain.invalid_status(status, domain.CONTACT_STATUSES)
     conditions, parameters = [], []
-    for condition, value in (("status = ?", status), ("company = ? COLLATE NOCASE", company)):
+    for condition, value in (
+        ("contact.status = ?", status),
+        ("company.normalized_name = ?", db.normalize_name(company) if company else company),
+    ):
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    rows = connection.execute(f"SELECT * FROM contact{where} ORDER BY id", parameters)
+    rows = connection.execute(f"{CONTACT_SELECT}{where} ORDER BY contact.id", parameters)
     return [contact_to_dict(row, settings) for row in rows]
 
 
@@ -69,8 +94,8 @@ def log_interaction(
     Updates the last contact date of the contact and, when informed, its status and next
     step. A contact in to_contact logged without a status moves to awaiting_reply, so it
     starts to have a follow-up; an informed status always prevails. If the contact is
-    linked to a job, the last contact date of the job is updated
-    too, with a job_history line. A last contact date never moves backwards: logging an
+    linked to a job, the last contact date of the job is updated too. Every field that
+    changes, of the contact or of the job, gets a history line. A last contact date never moves backwards: logging an
     older interaction keeps the more recent date. Returns the updated contact, its new
     follow-up and the linked job (None when there is none), or a structured error without
     changing anything.
@@ -99,20 +124,26 @@ def log_interaction(
             "INSERT INTO interaction (contact_id, date, summary) VALUES (?, ?, ?)",
             (contact_id, interaction_on, summary.strip()),
         )
-        connection.execute(
-            "UPDATE contact SET last_contact_on = ?, status = ?, next_step = ? WHERE id = ?",
-            (
-                max(interaction_on, contact["last_contact_on"] or ""),
-                status if status is not None else contact["status"],
-                next_step if next_step is not None else contact["next_step"],
-                contact_id,
-            ),
+        history.record_changes(
+            connection,
+            "contact",
+            contact_id,
+            contact,
+            {
+                "last_contact_on": max(interaction_on, contact["last_contact_on"] or ""),
+                "status": status if status is not None else contact["status"],
+                "next_step": next_step if next_step is not None else contact["next_step"],
+            },
+            interaction_date,
+            INTERACTION_SOURCE_TYPE,
+            INTERACTION_SOURCE,
         )
         if job and interaction_on > (job["last_contact_on"] or ""):
             jobs.apply_job_changes(
                 connection,
                 job,
                 {"last_contact_on": interaction_on},
+                INTERACTION_SOURCE_TYPE,
                 INTERACTION_SOURCE,
                 interaction_date,
             )

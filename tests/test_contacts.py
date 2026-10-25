@@ -12,6 +12,12 @@ def rows(connection, table):
     return [dict(row) for row in connection.execute(f"SELECT * FROM {table} ORDER BY id")]
 
 
+def job_history(connection):
+    """History lines written for applications (the job side of an interaction)."""
+    query = "SELECT * FROM history WHERE entity = 'application' ORDER BY id"
+    return [dict(row) for row in connection.execute(query)]
+
+
 def test_list_contacts_returns_all_seed_contacts_with_follow_up(connection):
     result = contacts.list_contacts(connection)
     assert [contact["id"] for contact in result] == list(range(1, 9))
@@ -70,9 +76,11 @@ def test_log_interaction_moves_follow_up_to_interaction_date_plus_six_days(
             "contact_id": 7,
             "date": "2026-03-16",
             "summary": "Conversa de acompanhamento",
+            "channel": None,
+            "source_type": None,
         }
     ]
-    assert count(connection, "job_history") == 0
+    assert job_history(connection) == []
     json.dumps(result)
 
 
@@ -108,14 +116,15 @@ def test_log_interaction_updates_last_contact_of_linked_job_with_history(
     assert result["job"]["last_contact_on"] == "2026-03-16"
     assert result["job"]["follow_up"] == "2026-03-23"
     assert jobs.get_job(connection, 1) == result["job"]
-    history = rows(connection, "job_history")
+    history = job_history(connection)
     assert len(history) == 1
-    assert history[0]["job_id"] == 1
+    assert history[0]["record_id"] == 1  # the application of job 1
     assert history[0]["date"] == "2026-03-16"
     assert history[0]["field"] == "last_contact_on"
     assert history[0]["old_value"] == "2026-03-09"
     assert history[0]["new_value"] == "2026-03-16"
-    assert history[0]["source"] == contacts.INTERACTION_SOURCE == "contact_interaction"
+    assert history[0]["source_type"] == "user"
+    assert history[0]["source_ref"] == contacts.INTERACTION_SOURCE == "contact_interaction"
 
 
 def test_log_interaction_sets_last_contact_of_linked_job_that_had_none(connection):
@@ -123,7 +132,7 @@ def test_log_interaction_sets_last_contact_of_linked_job_that_had_none(connectio
     assert result["job"]["id"] == 2
     assert result["job"]["last_contact_on"] == "2026-03-15"
     assert result["job"]["follow_up"] == "2026-03-22"  # now counts from the contact, not applied_on
-    history = rows(connection, "job_history")
+    history = job_history(connection)
     assert history[0]["old_value"] is None
     assert history[0]["new_value"] == "2026-03-15"
 
@@ -134,7 +143,7 @@ def test_log_interaction_older_than_last_contact_keeps_the_most_recent_dates(con
     assert result["follow_up"] == "2026-03-14"
     assert result["job"]["last_contact_on"] == "2026-03-09"
     assert count(connection, "interaction") == 1
-    assert count(connection, "job_history") == 0
+    assert job_history(connection) == []
 
 
 def test_log_interaction_unknown_contact_returns_error(connection, reference_date):
@@ -156,7 +165,7 @@ def test_log_interaction_with_invalid_status_returns_error_and_changes_nothing(
     assert contacts.get_contact(connection, 1) == before
     assert jobs.get_job(connection, 1) == job_before
     assert count(connection, "interaction") == 0
-    assert count(connection, "job_history") == 0
+    assert job_history(connection) == []
 
 
 def test_log_interaction_requires_summary_and_valid_date(connection, reference_date):
@@ -205,3 +214,9 @@ def test_log_interaction_without_status_keeps_the_status_of_other_contacts(
     result = contacts.log_interaction(connection, 6, "Mensagem de cortesia", reference_date)
     assert result["contact"]["status"] == "closed"
     assert result["follow_up"] is None
+
+
+def test_list_contacts_company_filter_ignores_case_accents_and_spaces(connection):
+    for spelling in ("Transportadora Pampa", "TRANSPORTADORA PAMPA", " transportadora  pampá "):
+        assert [c["id"] for c in contacts.list_contacts(connection, company=spelling)] == [3]
+    assert contacts.list_contacts(connection, company="Transportadora") == []
