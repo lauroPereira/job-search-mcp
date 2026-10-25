@@ -1,7 +1,11 @@
 import json
 from datetime import date
 
+from helpers import write
+
 from job_search_mcp import domain, jobs, summary
+
+ADDED_ON = date(2026, 3, 16)
 
 
 def ids(items):
@@ -52,7 +56,10 @@ def test_closed_and_not_started_jobs_and_contacts_are_left_out(connection):
 
 def test_job_that_gets_closed_leaves_the_pending_followups(connection, reference_date):
     assert 5 in ids(summary.pending_followups(connection, reference_date)["jobs"])
-    jobs.update_job(connection, 5, "usuário", reference_date, status="rejected")
+    write(
+        connection,
+        jobs.plan_update_job(connection, 5, "usuário", reference_date, status="rejected"),
+    )
     assert 5 not in ids(summary.pending_followups(connection, reference_date)["jobs"])
 
 
@@ -124,8 +131,23 @@ def test_application_queue_is_ordered_by_score_from_highest_to_lowest(connection
 
 def test_application_queue_puts_jobs_without_score_last(connection, reference_date):
     url = "https://vagas.example.com/empresa-exemplo/data-engineer"
-    added = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", url)
-    scored = jobs.add_job(connection, "Empresa Exemplo", "ML Engineer", f"{url}-ml", score=8.0)
+    added = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Data Engineer", url, reference_date=ADDED_ON
+        ),
+    )
+    scored = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "ML Engineer",
+            f"{url}-ml",
+            score=8.0,
+            reference_date=ADDED_ON,
+        ),
+    )
     result = summary.daily_summary(connection, reference_date)
     assert ids(result["application_queue"]) == [8, scored["id"], 9, 10, added["id"]]
     assert result["jobs_by_status"]["suggested"] == 3
@@ -157,8 +179,23 @@ def test_application_queue_puts_score_zero_before_jobs_without_score(connection,
     # The job without score is added first (lower id): if a missing score counted as zero,
     # the tie would be broken by id and it would come before the job with score 0.
     url = "https://vagas.example.com/empresa-exemplo/fila"
-    without_score = jobs.add_job(connection, "Empresa Exemplo", "Sem nota", f"{url}-sem-nota")
-    zero = jobs.add_job(connection, "Empresa Exemplo", "Nota zero", f"{url}-zero", score=0.0)
+    without_score = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Sem nota", f"{url}-sem-nota", reference_date=ADDED_ON
+        ),
+    )
+    zero = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Nota zero",
+            f"{url}-zero",
+            score=0.0,
+            reference_date=ADDED_ON,
+        ),
+    )
     assert without_score["id"] < zero["id"]
     assert without_score["score"] is None
     assert zero["score"] == 0.0
@@ -169,12 +206,45 @@ def test_application_queue_puts_score_zero_before_jobs_without_score(connection,
 
 def test_application_queue_breaks_score_ties_by_id(connection, reference_date):
     url = "https://vagas.example.com/empresa-exemplo/empate"
-    first = jobs.add_job(connection, "Empresa Exemplo", "Empate A", f"{url}-a", score=7.8)
-    second = jobs.add_job(connection, "Empresa Exemplo", "Empate B", f"{url}-b", score=7.8)
-    no_score_a = jobs.add_job(connection, "Empresa Exemplo", "Sem nota A", f"{url}-sem-a")
-    no_score_b = jobs.add_job(connection, "Empresa Exemplo", "Sem nota B", f"{url}-sem-b")
+    first = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Empate A",
+            f"{url}-a",
+            score=7.8,
+            reference_date=ADDED_ON,
+        ),
+    )
+    second = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Empate B",
+            f"{url}-b",
+            score=7.8,
+            reference_date=ADDED_ON,
+        ),
+    )
+    no_score_a = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Sem nota A", f"{url}-sem-a", reference_date=ADDED_ON
+        ),
+    )
+    no_score_b = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Sem nota B", f"{url}-sem-b", reference_date=ADDED_ON
+        ),
+    )
     # Seed job 9 has the same score; moving it to suggested mixes statuses in the tie.
-    jobs.update_job(connection, 9, "usuário", reference_date, status="suggested")
+    write(
+        connection,
+        jobs.plan_update_job(connection, 9, "usuário", reference_date, status="suggested"),
+    )
     queue = summary.daily_summary(connection, reference_date)["application_queue"]
     assert [(job["id"], job["score"]) for job in queue] == [
         (8, 9.5),

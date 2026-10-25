@@ -1,6 +1,8 @@
 import json
 from datetime import date
 
+from helpers import write
+
 from job_search_mcp import contacts, domain, jobs
 
 
@@ -63,7 +65,10 @@ def test_list_contacts_with_invalid_status_returns_error(connection):
 def test_log_interaction_moves_follow_up_to_interaction_date_plus_six_days(
     connection, reference_date
 ):
-    result = contacts.log_interaction(connection, 7, "Conversa de acompanhamento", reference_date)
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 7, "Conversa de acompanhamento", reference_date),
+    )
     assert result["follow_up"] == "2026-03-22"
     assert result["contact"]["last_contact_on"] == "2026-03-16"
     assert result["contact"]["follow_up"] == "2026-03-22"
@@ -85,13 +90,16 @@ def test_log_interaction_moves_follow_up_to_interaction_date_plus_six_days(
 
 
 def test_log_interaction_accepts_iso_text_and_updates_status_and_next_step(connection):
-    result = contacts.log_interaction(
+    result = write(
         connection,
-        8,
-        "Primeira conversa",
-        "2026-03-16",
-        status="in_conversation",
-        next_step="Enviar currículo",
+        contacts.plan_log_interaction(
+            connection,
+            8,
+            "Primeira conversa",
+            "2026-03-16",
+            status="in_conversation",
+            next_step="Enviar currículo",
+        ),
     )
     assert result["contact"]["status"] == "in_conversation"
     assert result["contact"]["next_step"] == "Enviar currículo"
@@ -100,7 +108,10 @@ def test_log_interaction_accepts_iso_text_and_updates_status_and_next_step(conne
 
 
 def test_log_interaction_that_leaves_contact_in_status_without_follow_up(connection):
-    result = contacts.log_interaction(connection, 1, "Encerrou o contato", "2026-03-16", "closed")
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 1, "Encerrou o contato", "2026-03-16", "closed"),
+    )
     assert result["contact"]["status"] == "closed"
     assert result["contact"]["last_contact_on"] == "2026-03-16"
     assert result["follow_up"] is None
@@ -111,7 +122,10 @@ def test_log_interaction_updates_last_contact_of_linked_job_with_history(
 ):
     before = jobs.get_job(connection, 1)
     assert before["last_contact_on"] == "2026-03-09"
-    result = contacts.log_interaction(connection, 1, "Respondeu sobre a indicação", reference_date)
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 1, "Respondeu sobre a indicação", reference_date),
+    )
     assert result["job"]["id"] == 1
     assert result["job"]["last_contact_on"] == "2026-03-16"
     assert result["job"]["follow_up"] == "2026-03-23"
@@ -128,7 +142,9 @@ def test_log_interaction_updates_last_contact_of_linked_job_with_history(
 
 
 def test_log_interaction_sets_last_contact_of_linked_job_that_had_none(connection):
-    result = contacts.log_interaction(connection, 2, "Combinou horários", "2026-03-15")
+    result = write(
+        connection, contacts.plan_log_interaction(connection, 2, "Combinou horários", "2026-03-15")
+    )
     assert result["job"]["id"] == 2
     assert result["job"]["last_contact_on"] == "2026-03-15"
     assert result["job"]["follow_up"] == "2026-03-22"  # now counts from the contact, not applied_on
@@ -138,7 +154,10 @@ def test_log_interaction_sets_last_contact_of_linked_job_that_had_none(connectio
 
 
 def test_log_interaction_older_than_last_contact_keeps_the_most_recent_dates(connection):
-    result = contacts.log_interaction(connection, 1, "Conversa antiga", date(2026, 3, 1))
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 1, "Conversa antiga", date(2026, 3, 1)),
+    )
     assert result["contact"]["last_contact_on"] == "2026-03-08"
     assert result["follow_up"] == "2026-03-14"
     assert result["job"]["last_contact_on"] == "2026-03-09"
@@ -147,7 +166,9 @@ def test_log_interaction_older_than_last_contact_keeps_the_most_recent_dates(con
 
 
 def test_log_interaction_unknown_contact_returns_error(connection, reference_date):
-    result = contacts.log_interaction(connection, 999, "Conversa", reference_date)
+    result = write(
+        connection, contacts.plan_log_interaction(connection, 999, "Conversa", reference_date)
+    )
     assert result["error"] == "not_found"
     assert "999" in result["detail"]
     assert count(connection, "interaction") == 0
@@ -158,7 +179,10 @@ def test_log_interaction_with_invalid_status_returns_error_and_changes_nothing(
 ):
     before = contacts.get_contact(connection, 1)
     job_before = jobs.get_job(connection, 1)
-    result = contacts.log_interaction(connection, 1, "Conversa", reference_date, status="applied")
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 1, "Conversa", reference_date, status="applied"),
+    )
     assert result["error"] == "invalid_status"
     assert result["valid_statuses"] == list(domain.CONTACT_STATUSES)
     assert "awaiting_reply" in result["detail"]
@@ -169,9 +193,22 @@ def test_log_interaction_with_invalid_status_returns_error_and_changes_nothing(
 
 
 def test_log_interaction_requires_summary_and_valid_date(connection, reference_date):
-    assert contacts.log_interaction(connection, 1, " ", reference_date)["error"] == "invalid_input"
-    assert contacts.log_interaction(connection, 1, "Conversa", "16/03")["error"] == "invalid_date"
-    assert contacts.log_interaction(connection, 1, "Conversa", None)["error"] == "invalid_date"
+    assert (
+        write(connection, contacts.plan_log_interaction(connection, 1, " ", reference_date))[
+            "error"
+        ]
+        == "invalid_input"
+    )
+    assert (
+        write(connection, contacts.plan_log_interaction(connection, 1, "Conversa", "16/03"))[
+            "error"
+        ]
+        == "invalid_date"
+    )
+    assert (
+        write(connection, contacts.plan_log_interaction(connection, 1, "Conversa", None))["error"]
+        == "invalid_date"
+    )
     assert count(connection, "interaction") == 0
 
 
@@ -181,7 +218,10 @@ def test_log_interaction_without_status_moves_to_contact_to_awaiting_reply(
     before = contacts.get_contact(connection, 8)
     assert before["status"] == "to_contact"
     assert before["follow_up"] is None
-    result = contacts.log_interaction(connection, 8, "Primeira mensagem enviada", reference_date)
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 8, "Primeira mensagem enviada", reference_date),
+    )
     assert result["contact"]["status"] == "awaiting_reply"
     assert result["contact"]["last_contact_on"] == "2026-03-16"
     assert result["follow_up"] == "2026-03-22"  # interaction date plus 6 days
@@ -194,14 +234,20 @@ def test_log_interaction_without_status_moves_to_contact_to_awaiting_reply(
 def test_log_interaction_with_explicit_status_on_to_contact_keeps_the_informed_status(
     connection, reference_date
 ):
-    result = contacts.log_interaction(
-        connection, 8, "Conversa por telefone", reference_date, status="in_conversation"
+    result = write(
+        connection,
+        contacts.plan_log_interaction(
+            connection, 8, "Conversa por telefone", reference_date, status="in_conversation"
+        ),
     )
     assert result["contact"]["status"] == "in_conversation"
     assert result["follow_up"] == "2026-03-22"
     # Explicitly keeping to_contact is respected too: the contact stays without a follow-up.
-    kept = contacts.log_interaction(
-        connection, 5, "Tentativa sem resposta", reference_date, status="to_contact"
+    kept = write(
+        connection,
+        contacts.plan_log_interaction(
+            connection, 5, "Tentativa sem resposta", reference_date, status="to_contact"
+        ),
     )
     assert kept["contact"]["status"] == "to_contact"
     assert kept["follow_up"] is None
@@ -211,7 +257,10 @@ def test_log_interaction_without_status_keeps_the_status_of_other_contacts(
     connection, reference_date
 ):
     # Only to_contact advances by itself; a closed contact stays closed.
-    result = contacts.log_interaction(connection, 6, "Mensagem de cortesia", reference_date)
+    result = write(
+        connection,
+        contacts.plan_log_interaction(connection, 6, "Mensagem de cortesia", reference_date),
+    )
     assert result["contact"]["status"] == "closed"
     assert result["follow_up"] is None
 

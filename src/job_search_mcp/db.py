@@ -136,6 +136,18 @@ CREATE TABLE IF NOT EXISTS history (
 );
 
 CREATE INDEX IF NOT EXISTS history_record ON history (entity, record_id);
+
+CREATE TABLE IF NOT EXISTS proposal (
+    id TEXT PRIMARY KEY,
+    tool TEXT NOT NULL,
+    arguments TEXT NOT NULL,
+    preview TEXT NOT NULL,
+    base_versions TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('pending', 'applied', 'discarded', 'expired', 'stale')),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
 """
 
 
@@ -226,13 +238,16 @@ def create_schema(connection: sqlite3.Connection) -> None:
     old tables) is copied to <name>.v1.bak and migrated in a single transaction; the
     migration report (backup path and joined or renamed companies) goes to stderr, never to
     stdout, which carries the MCP protocol. A database already in version 2 is left as it
-    is, so this is safe to call at every opening. Any other version raises
-    sqlite3.DatabaseError.
+    is, apart from the tables version 2 gained after it first reached develop (proposal),
+    which are created when missing, so this is safe to call at every opening. Any other
+    version raises sqlite3.DatabaseError.
 
     The version is read again under the write lock (BEGIN IMMEDIATE): when two processes
     open the same v0.1.0 database at once, only the first one copies and migrates it.
     """
     if _user_version(connection) == SCHEMA_VERSION:
+        # Every statement is CREATE ... IF NOT EXISTS: a no-op on a complete database.
+        _run_schema(connection)
         return
     # Foreign keys can only be switched off outside a transaction. legacy_alter_table keeps
     # interaction pointing to the name "contact" when the old table is renamed.

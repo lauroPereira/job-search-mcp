@@ -1,9 +1,10 @@
-"""MCP server: registers the seven tools, converts input and output and delegates to the domain.
+"""MCP server: registers the tools, converts input and output and delegates to the domain.
 
 No business rule lives here. Every tool reads the local settings, opens the configured
 database, creates the schema when the database is new, calls the domain function and closes
 the connection. Results and business errors are plain objects, so the client receives them
-as structured content.
+as structured content. Write tools only store a proposal (proposals.py): changes_confirm
+applies it.
 """
 
 import argparse
@@ -17,7 +18,7 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from pydantic import Field
 
-from job_search_mcp import config, contacts, db, domain, jobs
+from job_search_mcp import config, contacts, db, domain, jobs, proposals
 from job_search_mcp import summary as summary_queries
 
 mcp = FastMCP(
@@ -25,7 +26,12 @@ mcp = FastMCP(
     instructions=(
         "Tools to manage a job search: jobs, networking contacts, follow-ups and a daily "
         "summary. Every tool returns an object; a business error is an object with the keys "
-        "'error' (a stable code) and 'detail' (a message to relay to the user)."
+        "'error' (a stable code) and 'detail' (a message to relay to the user). Writes take "
+        "two steps: add_job, update_job and log_interaction change nothing and return a "
+        "proposal with the changes (each field with its current and proposed value). Show "
+        "the changes to the user and call changes_confirm with the proposal id only after "
+        "the user approves; otherwise call changes_discard. Proposals expire, and one whose "
+        "records changed in the meantime is refused as stale: propose again."
     ),
 )
 
@@ -33,11 +39,26 @@ JOB_STATUS_HELP = f"One of: {', '.join(domain.JOB_STATUSES)}."
 CONTACT_STATUS_HELP = f"One of: {', '.join(domain.CONTACT_STATUSES)}."
 ISO_DATE_HELP = "ISO 8601 date (YYYY-MM-DD)."
 READ_ONLY = {"readOnlyHint": True}
+SOURCE_HELP = (
+    f"Where the information came from, written in the history: one of "
+    f"{', '.join(domain.SOURCE_TYPES)}. Other text is kept as the reference of type 'user'."
+)
 
 
 def today() -> datetime.date:
-    """The current date: the only place the server reads the clock (tests replace it)."""
+    """The current date: the server reads the date only here (tests replace it)."""
     return datetime.date.today()
+
+
+def now() -> datetime.datetime:
+    """The current moment in UTC, for proposal expiry: the only other clock read."""
+    return datetime.datetime.now(datetime.UTC)
+
+
+def propose(tool: str, arguments: dict) -> dict:
+    """Store a proposal for a write tool and return it, or the structured error."""
+    with open_database() as connection:
+        return proposals.create(connection, tool, arguments, now(), config.load_settings())
 
 
 @contextmanager
@@ -117,24 +138,32 @@ def add_job(
     ] = None,
     score: Annotated[float | None, Field(description="Fit score from 0 to 10.")] = None,
     next_step: Annotated[str | None, Field(description="Next action to take on this job.")] = None,
+    source: Annotated[str, Field(description=SOURCE_HELP)] = domain.USER_SOURCE,
 ) -> dict[str, Any]:
-    """Register a new job in the status 'suggested'.
+    """Propose registering a new job in the status 'suggested'.
 
-    Returns the created job. If a job with the same url already exists, nothing is created
-    and the result is the error 'duplicate_url', with the existing job in the key 'job'.
-    A track outside the valid ones or a score outside 0 to 10 is the error 'invalid_input'.
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. Once confirmed, changes_confirm returns the created job. If a job with
+    the same url already exists, the result is the error 'duplicate_url', with the existing
+    job in the key 'job'. A track outside the valid ones, a score outside 0 to 10 or an
+    empty source is the error 'invalid_input'.
     """
-    with open_database() as connection:
-        return jobs.add_job(
-            connection,
-            company,
-            title,
-            url,
-            track=track,
-            score=score,
-            next_step=next_step,
-            settings=config.load_settings(),
-        )
+    return propose(
+        "add_job",
+        {
+            "company": company,
+            "title": title,
+            "url": url,
+            "track": track,
+            "score": score,
+            "next_step": next_step,
+            "source": source,
+            "reference_date": today().isoformat(),
+        },
+    )
 
 
 @mcp.tool
@@ -142,7 +171,7 @@ def update_job(
     job_id: Annotated[int, Field(description="Id of the job to update (see list_jobs).")],
     source: Annotated[
         str,
-        Field(description="Where the change came from, written in the history (e.g. 'user')."),
+        Field(description=SOURCE_HELP),
     ],
     status: Annotated[str | None, Field(description=f"New status. {JOB_STATUS_HELP}")] = None,
     next_step: Annotated[str | None, Field(description="New next action for this job.")] = None,
@@ -155,28 +184,25 @@ def update_job(
         Field(description=f"Date of the last contact about it. {ISO_DATE_HELP} Not after today."),
     ] = None,
 ) -> dict[str, Any]:
-    """Update the informed fields of a job; fields left out are not touched.
+    """Propose updating the informed fields of a job; fields left out are not touched.
 
-    Returns {"job": the updated job, "history": the history lines created}, one line for
-    each field that really changed, dated today. Changing the status to 'applied' on a job
-    without an application date sets applied_on to today.
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. Once confirmed, changes_confirm returns {"job": the updated job,
+    "history": the history lines created}, one line for each field that really changed,
+    dated the day of the proposal. Changing the status to 'applied' on a job without an
+    application date sets applied_on to that day.
     """
-    dates = {}
+    arguments = {"job_id": job_id, "source": source, "reference_date": today().isoformat()}
+    arguments |= {"status": status, "next_step": next_step}
     for field, value in (("applied_on", applied_on), ("last_contact_on", last_contact_on)):
-        dates[field] = past_date(field, value)
-        if domain.is_error(dates[field]):
-            return dates[field]
-    with open_database() as connection:
-        return jobs.update_job(
-            connection,
-            job_id,
-            source,
-            today(),
-            status=status,
-            next_step=next_step,
-            settings=config.load_settings(),
-            **dates,
-        )
+        parsed = past_date(field, value)
+        if domain.is_error(parsed):
+            return parsed
+        arguments[field] = parsed.isoformat() if parsed else None
+    return propose("update_job", arguments)
 
 
 @mcp.tool(annotations=READ_ONLY)
@@ -222,25 +248,72 @@ def log_interaction(
     ] = None,
     next_step: Annotated[str | None, Field(description="New next action for this contact.")] = None,
 ) -> dict[str, Any]:
-    """Record a conversation with a contact and recalculate its follow-up.
+    """Propose recording a conversation with a contact and recalculating its follow-up.
 
-    Returns {"contact": the updated contact, "follow_up": the new follow-up date, "job": the
-    linked job or null}. The last contact date of a linked job is updated too. A contact in
-    'to_contact' logged without a status moves to 'awaiting_reply'.
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. Once confirmed, changes_confirm returns {"contact": the updated
+    contact, "follow_up": the new follow-up date, "job": the linked job or null}. The last
+    contact date of a linked job is updated too. A contact in 'to_contact' logged without a
+    status moves to 'awaiting_reply'.
     """
     interaction_date = past_date("date", date) if date is not None else today()
     if domain.is_error(interaction_date):
         return interaction_date
+    return propose(
+        "log_interaction",
+        {
+            "contact_id": contact_id,
+            "summary": summary,
+            "date": interaction_date.isoformat(),
+            "status": status,
+            "next_step": next_step,
+        },
+    )
+
+
+@mcp.tool
+def changes_confirm(
+    proposal_id: Annotated[
+        str, Field(description="Id of the proposal the user approved (from a write tool).")
+    ],
+) -> dict[str, Any]:
+    """Apply a proposal the user approved, exactly as it was shown.
+
+    Returns what the proposing tool returns once applied (add_job: the created job;
+    update_job: {"job", "history"}; log_interaction: {"contact", "follow_up", "job"}).
+    Errors: 'stale_proposal' when the records changed since the proposal (nothing is
+    written: propose again), 'expired_proposal' when it is past its expiry, and
+    'not_found' for an unknown id or a proposal already applied or discarded.
+    """
     with open_database() as connection:
-        return contacts.log_interaction(
-            connection,
-            contact_id,
-            summary,
-            interaction_date,
-            status=status,
-            next_step=next_step,
-            settings=config.load_settings(),
-        )
+        return proposals.confirm(connection, proposal_id, now(), config.load_settings())
+
+
+@mcp.tool
+def changes_discard(
+    proposal_id: Annotated[str, Field(description="Id of the proposal to drop.")],
+) -> dict[str, Any]:
+    """Drop a pending proposal the user did not approve; nothing else changes.
+
+    Returns {"proposal": {"id", "tool", "status": "discarded"}}, or the errors of
+    changes_confirm.
+    """
+    with open_database() as connection:
+        return proposals.discard(connection, proposal_id, now())
+
+
+@mcp.tool(annotations=READ_ONLY)
+def changes_list_pending() -> dict[str, Any]:
+    """List the proposals still waiting for the user's decision, oldest first.
+
+    Returns {"proposals": [...]}, each with id, tool, changes, created_at and expires_at
+    (UTC). Proposals past their expiry are marked expired and left out.
+    """
+    with open_database() as connection:
+        return {"proposals": proposals.list_pending(connection, now())}
 
 
 @mcp.tool(annotations=READ_ONLY)

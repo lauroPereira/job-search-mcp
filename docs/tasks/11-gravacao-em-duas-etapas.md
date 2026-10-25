@@ -39,18 +39,37 @@ Fazer toda ferramenta de escrita devolver uma proposta e só gravar com `changes
 
 ## Critérios de conclusão
 
-- [ ] Nenhuma ferramenta de escrita altera o banco sem `changes_confirm` (teste).
-- [ ] Confirmação de proposta desatualizada devolve `stale_proposal` (teste).
-- [ ] Proposta vencida devolve `expired_proposal` (teste).
-- [ ] Escrita sem origem é recusada (teste).
-- [ ] `python tools/scripts/lint_and_tests.py --strict` sem falhas.
+- [x] Nenhuma ferramenta de escrita altera o banco sem `changes_confirm` (teste).
+- [x] Confirmação de proposta desatualizada devolve `stale_proposal` (teste).
+- [x] Proposta vencida devolve `expired_proposal` (teste).
+- [x] Escrita sem origem é recusada (teste).
+- [x] `python tools/scripts/lint_and_tests.py --strict` sem falhas.
 
 ## Validação
 
-Pendente.
+Data: 2026-10-25. Ambiente: Windows 11, Python 3.12.7 (SQLite 3.45.3) no `.venv` do worktree, instalado com `pip install -e ".[dev]"`.
+
+- `.venv\Scripts\python.exe tools/scripts/lint_and_tests.py --strict`: estrutura e skills válidas, `230 passed`, `ruff check` sem achados (`All checks passed!`); `ruff format --check src tests` sem diferenças.
+- Dos 213 testes anteriores, os das três ferramentas de escrita passam a propor e confirmar: nos testes de domínio (`test_jobs.py`, `test_contacts.py`, `test_summary.py`, `test_history.py`, `test_migration.py`), `jobs.add_job(...)` virou `write(connection, jobs.plan_add_job(..., reference_date=...))` (e o mesmo para `plan_update_job` e `plan_log_interaction`), com `tests/helpers.py::write` aplicando o plano numa transação; nos testes do servidor, `confirmed(...)` chama a ferramenta e depois `changes_confirm`. Asserções de resultado não mudaram. `test_db.py` passou a esperar a tabela `proposal`, e os testes de lista de ferramentas, parâmetros e `readOnlyHint` incluem as três `changes_*` e o `source` de `add_job`.
+- `tests/test_proposals.py` (17 testes): para cada ferramenta de escrita, retrato de todas as tabelas exceto `proposal` igual antes e depois da proposta, e confirmação que aplica, grava histórico e marca `applied`; prévia de `update_job` e resultado no formato da `v0.1.0`; prévia e histórico de criação de `add_job` (empresa nova, vaga, candidatura); erros de validação sem proposta (inclusive `source` vazio); proposta desatualizada por versão (`stale_proposal`, sem alterar nada, marcada `stale`), por prévia diferente (empresa criada por outra proposta) e por operação que passou a falhar (URL duplicada, com `reason`); proposta vencida (`expired_proposal` com o relógio 24 h depois, marcada `expired`, descarte também recusado); validade vinda de `Settings.proposal_ttl_hours`; `list_pending` marcando as vencidas; descarte sem alterar nada e sem poder confirmar depois; confirmar duas vezes não reaplica (`not_found`, `status: applied`); id inexistente (`not_found`); falha durante a aplicação desfaz tudo e mantém a proposta pendente; banco v2 sem a tabela `proposal` a recebe ao abrir.
+- `tests/test_server.py` (novos): pelo cliente MCP em memória, para cada ferramenta de escrita, retrato igual após a proposta e após `changes_list_pending`, chaves da proposta e de cada mudança, `expires_at` 24 h depois, confirmação que aplica e grava histórico com `source_type`, segunda confirmação recusada; `changes_discard`; `stale_proposal`, `expired_proposal` (relógio do servidor trocado) e `not_found`; `source` vazio recusado em `add_job` e `update_job`; `source="print"` gravado no histórico da vaga criada.
+
+Decisões de desenho:
+
+- **Cálculo separado da aplicação.** `jobs.plan_add_job`, `jobs.plan_update_job` e `contacts.plan_log_interaction` validam e calculam sem gravar e devolvem um erro estruturado ou um `domain.Plan` com `changes` (a prévia), `base_versions` (`"entidade:id"` → `version` lida) e `apply` (grava sem commit e devolve o resultado da `v0.1.0`). As antigas `add_job`, `update_job` e `log_interaction` do domínio foram substituídas, sem código morto; os testes de domínio aplicam o plano pelo auxiliar `write`.
+- **Prévia.** Lista de `{entity, record_id, field, old_value, new_value}`; `record_id` é null em criação. `history.diff` calcula a prévia de alteração (os mesmos campos que `record_changes` grava) e `history.creation` a de criação (campos informados). `update_job` sem mudança real gera proposta com `changes` vazio; confirmada, devolve a vaga e `history` vazio.
+- **Proposta.** `proposals.create` grava id (`secrets.token_urlsafe(16)`), ferramenta, argumentos, prévia e versões em JSON canônico (`sort_keys`), status `pending`, `created_at` e `expires_at` em UTC no formato `YYYY-MM-DD HH:MM:SS`, com `proposals.ttl_hours` da configuração (24 por padrão). Os argumentos guardam a data de referência do dia da proposta (`reference_date` de `add_job` e `update_job`, `date` de `log_interaction`), para que a confirmação aplique exatamente o que foi mostrado, mesmo em outro dia.
+- **Confirmação.** `proposals.confirm` abre `BEGIN IMMEDIATE`, marca as vencidas, recalcula o plano com os argumentos guardados e compara prévia e versões em JSON canônico; se diferirem, ou se a operação agora falhar (por exemplo, URL cadastrada nesse meio-tempo, com o erro em `reason`), marca `stale` e devolve `stale_proposal`; senão aplica e marca `applied` na mesma transação. Proposta já aplicada ou descartada devolve `not_found` com a chave `status` (o plano prevê só `stale_proposal`, `expired_proposal` e `not_found`); vencida, `expired_proposal`; desatualizada, `stale_proposal` de novo.
+- **Tabela `proposal` em bancos v2 existentes.** Fica no `SCHEMA` (versão 2, sem nova migração): como todo comando é `CREATE ... IF NOT EXISTS`, `db.create_schema` roda o `SCHEMA` também quando o banco já está na versão 2, o que cria a tabela num banco feito pela tarefa 10 e não faz nada num banco completo. A `v0.2.0` ainda não foi publicada, então não há banco v2 sem a tabela fora de desenvolvimento.
+- **Histórico de criação.** `add_job` passa a gravar histórico: uma linha por campo informado da empresa (se for nova), da vaga e da candidatura, com `old_value` null (`history.record_creation`). A interação não ganha linhas: é um registro só de inclusão, e o histórico cobre os registros alteráveis (com `version`). A prévia de `add_job` mostra a criação da empresa quando ela ainda não existe; duas propostas para a mesma empresa nova deixam a segunda desatualizada depois da primeira confirmação, o que é o comportamento seguro.
+- **Origem.** `add_job` ganha `source` opcional (padrão `user`, aditivo); `update_job` mantém `source` obrigatório. Tipo conhecido (`domain.SOURCE_TYPES`) vai para `source_type`; texto livre vira `user` com o texto em `source_ref`; vazio ou só espaços é recusado com `invalid_input`. `log_interaction` não ganhou parâmetro: as mudanças continuam com `source_type = user` e `source_ref = contact_interaction`.
+- **Relógio.** `server.now()` (UTC) é a única leitura de hora, ao lado de `server.today()`; `proposals.py` recebe `now`, e o teste de módulos sem relógio continua passando.
+- **Servidor.** As três ferramentas devolvem `{"proposal": {"id", "tool", "changes", "expires_at"}}`; `changes_confirm`, `changes_discard` e `changes_list_pending` (esta com `readOnlyHint`, embora marque as vencidas) foram registradas; descrições e `instructions` explicam o fluxo proposta → confirmação.
+
+Pendências: o README e `docs/case.md` ainda descrevem as ferramentas de escrita gravando direto; a atualização fica para a tarefa 16, com as notas da versão.
 
 ## Status
 
 ```text
-pendente
+concluída
 ```

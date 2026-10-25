@@ -80,7 +80,7 @@ def list_contacts(
     return [contact_to_dict(row, settings) for row in rows]
 
 
-def log_interaction(
+def plan_log_interaction(
     connection: sqlite3.Connection,
     contact_id: int,
     summary: str,
@@ -88,17 +88,18 @@ def log_interaction(
     status: str | None = None,
     next_step: str | None = None,
     settings: Settings | None = None,
-) -> dict:
-    """Record an interaction with a contact and refresh its follow-up.
+) -> domain.Plan | dict:
+    """Plan the record of an interaction with a contact, without writing anything.
 
-    Updates the last contact date of the contact and, when informed, its status and next
-    step. A contact in to_contact logged without a status moves to awaiting_reply, so it
-    starts to have a follow-up; an informed status always prevails. If the contact is
-    linked to a job, the last contact date of the job is updated too. Every field that
-    changes, of the contact or of the job, gets a history line. A last contact date never moves backwards: logging an
-    older interaction keeps the more recent date. Returns the updated contact, its new
-    follow-up and the linked job (None when there is none), or a structured error without
-    changing anything.
+    The plan adds the interaction and updates the last contact date of the contact and,
+    when informed, its status and next step. A contact in to_contact logged without a
+    status moves to awaiting_reply, so it starts to have a follow-up; an informed status
+    always prevails. If the contact is linked to a job, the last contact date of the job
+    is updated too. Every field that changes, of the contact or of the job, gets a history
+    line. A last contact date never moves backwards: logging an older interaction keeps
+    the more recent date. The plan depends on the versions of the contact and of the
+    linked application; applying it returns the updated contact, its new follow-up and
+    the linked job (None when there is none). Errors are structured and nothing is planned.
     """
     if not summary or not summary.strip():
         return domain.error("invalid_input", "Field 'summary' is required.")
@@ -118,38 +119,57 @@ def log_interaction(
         status = FIRST_INTERACTION_STATUS
 
     interaction_on = interaction_date.isoformat()
+    interaction = {"contact_id": contact_id, "date": interaction_on, "summary": summary.strip()}
+    contact_changes = {
+        "last_contact_on": max(interaction_on, contact["last_contact_on"] or ""),
+        "status": status if status is not None else contact["status"],
+        "next_step": next_step if next_step is not None else contact["next_step"],
+    }
+    changes = history.creation("interaction", interaction)
+    changes += history.diff("contact", contact_id, contact, contact_changes)
+    base_versions = {
+        f"contact:{contact_id}": history.read_version(connection, "contact", contact_id)
+    }
     job = jobs.get_job(connection, contact["job_id"], settings) if contact["job_id"] else None
-    with connection:
+    job_changes = {}
+    if job:
+        application_id = jobs.application_id(connection, job["id"])
+        base_versions[f"application:{application_id}"] = history.read_version(
+            connection, "application", application_id
+        )
+        if interaction_on > (job["last_contact_on"] or ""):
+            job_changes = {"last_contact_on": interaction_on}
+            changes += history.diff("application", application_id, job, job_changes)
+
+    def apply() -> dict:
         connection.execute(
             "INSERT INTO interaction (contact_id, date, summary) VALUES (?, ?, ?)",
-            (contact_id, interaction_on, summary.strip()),
+            (contact_id, interaction_on, interaction["summary"]),
         )
         history.record_changes(
             connection,
             "contact",
             contact_id,
             contact,
-            {
-                "last_contact_on": max(interaction_on, contact["last_contact_on"] or ""),
-                "status": status if status is not None else contact["status"],
-                "next_step": next_step if next_step is not None else contact["next_step"],
-            },
+            contact_changes,
             interaction_date,
             INTERACTION_SOURCE_TYPE,
             INTERACTION_SOURCE,
         )
-        if job and interaction_on > (job["last_contact_on"] or ""):
+        if job_changes:
             jobs.apply_job_changes(
                 connection,
                 job,
-                {"last_contact_on": interaction_on},
+                job_changes,
                 INTERACTION_SOURCE_TYPE,
                 INTERACTION_SOURCE,
                 interaction_date,
             )
-    contact = get_contact(connection, contact_id, settings)
-    return {
-        "contact": contact,
-        "follow_up": contact["follow_up"],
-        "job": jobs.get_job(connection, job["id"], settings) if job else None,
-    }
+        updated = get_contact(connection, contact_id, settings)
+        return {
+            "contact": updated,
+            "follow_up": updated["follow_up"],
+            "job": jobs.get_job(connection, job["id"], settings) if job else None,
+        }
+
+    return domain.Plan(changes=changes, base_versions=base_versions, apply=apply)

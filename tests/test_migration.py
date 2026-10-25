@@ -5,6 +5,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from helpers import write
 
 from job_search_mcp import contacts, db, jobs
 
@@ -220,10 +221,16 @@ def test_migrated_reads_match_a_new_database_with_the_same_seed(migrated, fresh)
 
 
 def test_migrated_database_accepts_writes(migrated):
-    result = jobs.update_job(migrated, 2, "user", "2026-03-16", status="in_review")
+    result = write(
+        migrated, jobs.plan_update_job(migrated, 2, "user", "2026-03-16", status="in_review")
+    )
     assert result["job"]["status"] == "in_review"
     assert count(migrated, "history") == 4
-    added = jobs.add_job(migrated, "Banco Aurora", "Analista", "https://vagas.example.com/x")
+    url = "https://vagas.example.com/x"
+    added = write(
+        migrated,
+        jobs.plan_add_job(migrated, "Banco Aurora", "Analista", url, reference_date="2026-03-16"),
+    )
     assert added["company_id"] == jobs.get_job(migrated, 1)["company_id"]
 
 
