@@ -4,6 +4,7 @@ import datetime
 import sqlite3
 
 from job_search_mcp import domain, jobs
+from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
 # Source written in job_history when an interaction moves the last contact date of a job.
@@ -13,23 +14,30 @@ NOT_CONTACTED_STATUS = "to_contact"
 FIRST_INTERACTION_STATUS = "awaiting_reply"
 
 
-def contact_to_dict(row: sqlite3.Row) -> dict:
-    """Turn a contact row into a plain dict, adding the calculated follow-up (ISO or None)."""
+def contact_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
+    """Turn a contact row into a plain dict, adding the calculated follow-up (ISO or None).
+
+    The follow-up days come from `settings` (None: the defaults).
+    """
     contact = dict(row)
-    follow_up = domain.contact_follow_up(contact["last_contact_on"], contact["status"])
+    days = (settings or DEFAULT_SETTINGS).contact_follow_up_days
+    follow_up = domain.contact_follow_up(contact["last_contact_on"], contact["status"], days=days)
     contact["follow_up"] = follow_up.isoformat() if follow_up else None
     return contact
 
 
-def get_contact(connection: sqlite3.Connection, contact_id: int) -> dict | None:
+def get_contact(
+    connection: sqlite3.Connection, contact_id: int, settings: Settings | None = None
+) -> dict | None:
     row = connection.execute("SELECT * FROM contact WHERE id = ?", (contact_id,)).fetchone()
-    return contact_to_dict(row) if row else None
+    return contact_to_dict(row, settings) if row else None
 
 
 def list_contacts(
     connection: sqlite3.Connection,
     status: str | None = None,
     company: str | None = None,
+    settings: Settings | None = None,
 ) -> list[dict] | dict:
     """List contacts ordered by id, optionally filtered by status and company.
 
@@ -44,7 +52,7 @@ def list_contacts(
             parameters.append(value)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     rows = connection.execute(f"SELECT * FROM contact{where} ORDER BY id", parameters)
-    return [contact_to_dict(row) for row in rows]
+    return [contact_to_dict(row, settings) for row in rows]
 
 
 def log_interaction(
@@ -54,6 +62,7 @@ def log_interaction(
     date: str | datetime.date,
     status: str | None = None,
     next_step: str | None = None,
+    settings: Settings | None = None,
 ) -> dict:
     """Record an interaction with a contact and refresh its follow-up.
 
@@ -74,7 +83,7 @@ def log_interaction(
         interaction_date = None
     if interaction_date is None:
         return domain.invalid_date("date", date)
-    contact = get_contact(connection, contact_id)
+    contact = get_contact(connection, contact_id, settings)
     if contact is None:
         return domain.not_found("contact", contact_id)
     if status is not None and status not in domain.CONTACT_STATUSES:
@@ -84,7 +93,7 @@ def log_interaction(
         status = FIRST_INTERACTION_STATUS
 
     interaction_on = interaction_date.isoformat()
-    job = jobs.get_job(connection, contact["job_id"]) if contact["job_id"] else None
+    job = jobs.get_job(connection, contact["job_id"], settings) if contact["job_id"] else None
     with connection:
         connection.execute(
             "INSERT INTO interaction (contact_id, date, summary) VALUES (?, ?, ?)",
@@ -107,9 +116,9 @@ def log_interaction(
                 INTERACTION_SOURCE,
                 interaction_date,
             )
-    contact = get_contact(connection, contact_id)
+    contact = get_contact(connection, contact_id, settings)
     return {
         "contact": contact,
         "follow_up": contact["follow_up"],
-        "job": jobs.get_job(connection, job["id"]) if job else None,
+        "job": jobs.get_job(connection, job["id"], settings) if job else None,
     }

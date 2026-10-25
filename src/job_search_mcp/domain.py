@@ -42,6 +42,7 @@ JOB_TRACKS = ("data", "systems", "product", "ai", "other")
 SCORE_MIN = 0
 SCORE_MAX = 10
 
+# Default follow-up days; the local settings (config.py) may change them.
 JOB_FOLLOW_UP_DAYS = 7
 CONTACT_FOLLOW_UP_DAYS = 6
 
@@ -107,8 +108,9 @@ def job_follow_up(
     applied_on: str | date | None,
     last_contact_on: str | date | None,
     status: str | None = None,
+    days: int = JOB_FOLLOW_UP_DAYS,
 ) -> date | None:
-    """Follow-up date of a job: last contact plus 7 days; without contact, application plus 7.
+    """Follow-up date of a job: last contact plus `days`; without contact, application plus it.
 
     Returns None when there is no date to count from or when the status, if given, is
     closed or does not generate a follow-up.
@@ -116,11 +118,15 @@ def job_follow_up(
     if status in JOB_CLOSED_STATUSES or status in JOB_NO_FOLLOW_UP_STATUSES:
         return None
     base = to_date(last_contact_on) or to_date(applied_on)
-    return base + timedelta(days=JOB_FOLLOW_UP_DAYS) if base else None
+    return base + timedelta(days=days) if base else None
 
 
-def contact_follow_up(last_contact_on: str | date | None, status: str | None = None) -> date | None:
-    """Follow-up date of a contact: last interaction plus 6 days.
+def contact_follow_up(
+    last_contact_on: str | date | None,
+    status: str | None = None,
+    days: int = CONTACT_FOLLOW_UP_DAYS,
+) -> date | None:
+    """Follow-up date of a contact: last interaction plus `days`.
 
     Returns None without a last interaction or when the status, if given, does not
     generate a follow-up (to_contact, closed).
@@ -128,7 +134,7 @@ def contact_follow_up(last_contact_on: str | date | None, status: str | None = N
     if status in CONTACT_NO_FOLLOW_UP_STATUSES:
         return None
     base = to_date(last_contact_on)
-    return base + timedelta(days=CONTACT_FOLLOW_UP_DAYS) if base else None
+    return base + timedelta(days=days) if base else None
 
 
 def classify(follow_up: date, reference_date: date, days_ahead: int = 2) -> str:

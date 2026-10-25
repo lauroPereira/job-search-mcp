@@ -1,8 +1,9 @@
 """MCP server: registers the seven tools, converts input and output and delegates to the domain.
 
-No business rule lives here. Every tool opens the configured database, creates the schema
-when the database is new, calls the domain function and closes the connection. Results and
-business errors are plain objects, so the client receives them as structured content.
+No business rule lives here. Every tool reads the local settings, opens the configured
+database, creates the schema when the database is new, calls the domain function and closes
+the connection. Results and business errors are plain objects, so the client receives them
+as structured content.
 """
 
 import argparse
@@ -16,7 +17,7 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from pydantic import Field
 
-from job_search_mcp import contacts, db, domain, jobs
+from job_search_mcp import config, contacts, db, domain, jobs
 from job_search_mcp import summary as summary_queries
 
 mcp = FastMCP(
@@ -90,7 +91,13 @@ def list_jobs(
     (null when the status does not generate a follow-up).
     """
     with open_database() as connection:
-        result = jobs.list_jobs(connection, status=status, track=track, min_score=min_score)
+        result = jobs.list_jobs(
+            connection,
+            status=status,
+            track=track,
+            min_score=min_score,
+            settings=config.load_settings(),
+        )
     return result if domain.is_error(result) else {"jobs": result}
 
 
@@ -115,7 +122,14 @@ def add_job(
     """
     with open_database() as connection:
         return jobs.add_job(
-            connection, company, title, url, track=track, score=score, next_step=next_step
+            connection,
+            company,
+            title,
+            url,
+            track=track,
+            score=score,
+            next_step=next_step,
+            settings=config.load_settings(),
         )
 
 
@@ -150,7 +164,14 @@ def update_job(
             return dates[field]
     with open_database() as connection:
         return jobs.update_job(
-            connection, job_id, source, today(), status=status, next_step=next_step, **dates
+            connection,
+            job_id,
+            source,
+            today(),
+            status=status,
+            next_step=next_step,
+            settings=config.load_settings(),
+            **dates,
         )
 
 
@@ -171,7 +192,9 @@ def list_contacts(
     follow_up date (null when the status does not generate a follow-up).
     """
     with open_database() as connection:
-        result = contacts.list_contacts(connection, status=status, company=company)
+        result = contacts.list_contacts(
+            connection, status=status, company=company, settings=config.load_settings()
+        )
     return result if domain.is_error(result) else {"contacts": result}
 
 
@@ -199,7 +222,13 @@ def log_interaction(
         return interaction_date
     with open_database() as connection:
         return contacts.log_interaction(
-            connection, contact_id, summary, interaction_date, status=status, next_step=next_step
+            connection,
+            contact_id,
+            summary,
+            interaction_date,
+            status=status,
+            next_step=next_step,
+            settings=config.load_settings(),
         )
 
 
@@ -226,7 +255,10 @@ def pending_followups(
         )
     with open_database() as connection:
         return summary_queries.pending_followups(
-            connection, reference_date if reference_date is not None else today(), days_ahead
+            connection,
+            reference_date if reference_date is not None else today(),
+            days_ahead,
+            settings=config.load_settings(),
         )
 
 
@@ -238,7 +270,12 @@ def daily_summary(
     ] = None,
     deadline: Annotated[
         str | None,
-        Field(description=f"Date the user wants to be hired by, if any. {ISO_DATE_HELP}"),
+        Field(
+            description=(
+                f"Date the user wants to be hired by, if any. {ISO_DATE_HELP} "
+                "Default: goals.deadline from the local settings, if set."
+            )
+        ),
     ] = None,
 ) -> dict[str, Any]:
     """Summary of the day: what the user should do today in the job search.
@@ -249,7 +286,10 @@ def daily_summary(
     """
     with open_database() as connection:
         return summary_queries.daily_summary(
-            connection, reference_date if reference_date is not None else today(), deadline
+            connection,
+            reference_date if reference_date is not None else today(),
+            deadline,
+            settings=config.load_settings(),
         )
 
 
@@ -284,7 +324,8 @@ def main(argv: list[str] | None = None) -> int:
         prog="job-search-mcp",
         description=(
             "MCP server for managing a job search, over stdio. The database path comes from "
-            f"{db.DB_ENV_VAR} (default: data/local/job_search.db under the project)."
+            f"{db.DB_ENV_VAR} (default: data/local/job_search.db under the project); the "
+            f"optional local settings file, from {config.CONFIG_ENV_VAR}."
         ),
     )
     parser.add_argument(
@@ -293,6 +334,12 @@ def main(argv: list[str] | None = None) -> int:
         help="load the synthetic demo data into a new database and exit, without serving",
     )
     arguments = parser.parse_args(argv)
+    try:
+        config.load_settings()
+    except config.ConfigError as failure:
+        # Checked at startup, so a broken settings file is reported once, without traceback.
+        print(failure, file=sys.stderr)
+        return 1
     if arguments.seed:
         try:
             refusal = seed_database()
