@@ -26,13 +26,13 @@ from job_search_mcp import summary as summary_queries
 mcp = FastMCP(
     "job-search",
     instructions=(
-        "Tools to manage a job search: jobs, networking contacts, follow-ups and a daily "
-        "summary. Every tool returns an object; a business error is an object with the keys "
-        "'error' (a stable code) and 'detail' (a message to relay to the user). Writes take "
-        "two steps: add_job, update_job, log_interaction, network_save_company, "
-        "network_save_person, jobs_add_stage and jobs_link_person change nothing and "
-        "return a proposal with the changes (each field with its current and proposed "
-        "value). Show the changes to the user and call "
+        "Tools to manage a job search: jobs, networking contacts, follow-ups, a daily "
+        "summary and funnel metrics. Every tool returns an object; a business error is an "
+        "object with the keys 'error' (a stable code) and 'detail' (a message to relay "
+        "to the user). Writes take two steps: add_job, update_job, log_interaction, "
+        "network_save_company, network_save_person, jobs_add_stage and jobs_link_person "
+        "change nothing and return a proposal with the changes (each field with its current "
+        "and proposed value). Show the changes to the user and call "
         "changes_confirm with the proposal id only after the user approves; otherwise call "
         "changes_discard. Proposals expire, and one whose records changed in the meantime is "
         "refused as stale: propose again."
@@ -631,6 +631,44 @@ def daily_summary(
             connection,
             reference_date if reference_date is not None else today(),
             deadline,
+            settings=config.load_settings(),
+        )
+
+
+@mcp.tool(annotations=READ_ONLY)
+def jobs_funnel_metrics(
+    reference_date: Annotated[
+        str | None,
+        Field(description=f"Date the metrics are calculated for. {ISO_DATE_HELP} Default: today."),
+    ] = None,
+    weeks: Annotated[
+        int,
+        Field(
+            description=(
+                "How many ISO weeks (Monday to Sunday) of applications to count, the week of "
+                f"the reference date being the last. Integer from 1 to {summary_queries.MAX_WEEKS}."
+            )
+        ),
+    ] = summary_queries.DEFAULT_WEEKS,
+) -> dict[str, Any]:
+    """Funnel metrics of the job search, calculated from the data (nothing is written).
+
+    Returns {"reference_date", "active_statuses" (statuses that count as active: every status
+    not closed, on_hold included), "active_by_status", "active_total", "in_interview"
+    (applications now in an interview status), "interview_rate" ({"reached_interview",
+    "applied", "rate"}: applications with applied_on that had an hr, technical or manager
+    stage or are in an interview status, divided by the applications with applied_on; rate
+    is null without applications), "applications_per_week" (week, start, end, applications;
+    oldest first, by applied_on), "active_with_referral" and "active_without_referral"
+    (confirmed referrer), "follow_ups" (how many jobs and contacts are overdue or due soon),
+    "deadline" and "days_to_deadline" (goals.deadline; null when not set) and "goals"
+    (applications_per_week and interview_rate from the local settings; null when not set)}.
+    """
+    with open_database() as connection:
+        return summary_queries.funnel_metrics(
+            connection,
+            reference_date if reference_date is not None else today(),
+            weeks,
             settings=config.load_settings(),
         )
 

@@ -29,6 +29,8 @@ JOB_STATUSES = (
 # paused it (on_hold, which still counts as active).
 JOB_CLOSED_STATUSES = frozenset({"hired", "rejected", "withdrawn", "closed"})
 JOB_NO_FOLLOW_UP_STATUSES = frozenset({"suggested", "to_apply", "blocked", "on_hold"})
+# Statuses of an application in interview.
+JOB_INTERVIEW_STATUSES = frozenset({"hr_interview", "tech_interview", "manager_interview"})
 
 CONTACT_STATUSES = (
     "to_contact",
@@ -61,6 +63,8 @@ SCORE_MAX = 10
 STAGE_KINDS = ("screening", "test", "culture_fit", "hr", "technical", "manager", "offer")
 STAGE_RESULTS = ("pending", "passed", "failed", "cancelled")
 DEFAULT_STAGE_RESULT = "pending"
+# Stages that count as an interview in the interview rate.
+INTERVIEW_STAGE_KINDS = frozenset({"hr", "technical", "manager"})
 
 # Roles of a person in an application; a confirmed referrer makes the job a high priority.
 PERSON_ROLES = ("referrer", "recruiter", "hiring_manager", "contact")

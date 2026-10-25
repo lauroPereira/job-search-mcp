@@ -3,7 +3,8 @@ from datetime import date
 
 from helpers import write
 
-from job_search_mcp import domain, jobs, summary
+from job_search_mcp import db, domain, jobs, summary
+from job_search_mcp.config import Settings
 
 ADDED_ON = date(2026, 3, 16)
 
@@ -273,3 +274,150 @@ def test_daily_summary_reads_jobs_and_contacts_only_once(connection, reference_d
     monkeypatch.setattr(summary, "list_contacts", counting_contacts)
     summary.daily_summary(connection, reference_date)
     assert calls == {"jobs": 1, "contacts": 1}
+
+
+def test_funnel_metrics_match_the_hand_count_over_the_seed(connection, reference_date):
+    result = summary.funnel_metrics(connection, reference_date)
+    assert result["reference_date"] == "2026-03-16"
+    # Active = every status not closed (on_hold included). Seed jobs 1 to 11 are active;
+    # 12 hired, 13 rejected, 14 withdrawn and 15 closed are not.
+    assert result["active_statuses"] == [
+        "suggested",
+        "to_apply",
+        "blocked",
+        "applied",
+        "in_review",
+        "hr_interview",
+        "tech_interview",
+        "manager_interview",
+        "offer",
+        "on_hold",
+    ]
+    assert result["active_by_status"] == {
+        "suggested": 1,  # 10 Escola Mirante
+        "to_apply": 2,  # 8 Financeira Colibri, 9 Mercado Jatobá
+        "blocked": 1,  # 11 Hospital Arvoredo
+        "applied": 2,  # 1 Banco Aurora, 2 Loja Horizonte
+        "in_review": 1,  # 3 Seguradora Vértice
+        "hr_interview": 1,  # 4 Clínica Boreal
+        "tech_interview": 1,  # 5 Transportadora Pampa
+        "manager_interview": 1,  # 6 Editora Farol
+        "offer": 1,  # 7 Usina Solaris
+        "on_hold": 0,
+    }
+    assert result["active_total"] == 11
+    assert result["in_interview"] == 3  # jobs 4, 5 and 6, in an interview status
+    # With applied_on: jobs 1 to 7, 12, 13 and 14 = 10. Reached an interview: 4, 5 and 6
+    # (status), 6 and 7 (hr, technical and manager stages) and 13 (hr and technical stages,
+    # rejected afterwards) = 5. Job 12 was hired without stages recorded: not counted.
+    assert result["interview_rate"] == {"reached_interview": 5, "applied": 10, "rate": 0.5}
+    # 2026-03-16 is a Monday: the last week is W12 (16 to 22 March), with no application.
+    # W11: job 2 (03-11). W10: jobs 1 (03-02) and 3 (03-05). W09: job 4 (03-01, a Sunday).
+    assert result["applications_per_week"] == [
+        {"week": "2026-W09", "start": "2026-02-23", "end": "2026-03-01", "applications": 1},
+        {"week": "2026-W10", "start": "2026-03-02", "end": "2026-03-08", "applications": 2},
+        {"week": "2026-W11", "start": "2026-03-09", "end": "2026-03-15", "applications": 1},
+        {"week": "2026-W12", "start": "2026-03-16", "end": "2026-03-22", "applications": 0},
+    ]
+    # Confirmed referrer only on job 1 (Ana Exemplo); job 11's referrer is not confirmed.
+    assert result["active_with_referral"] == 1
+    assert result["active_without_referral"] == 10
+    # Job follow-up = last contact (or applied_on) + 7 days; contact = last contact + 6.
+    # Overdue (on or before 03-16): jobs 5 (03-11) and 1 (03-16); contacts 1 (03-14) and
+    # 4 (03-16). Due soon (03-17 or 03-18): jobs 7, 2 and 3; contacts 2 and 7.
+    assert result["follow_ups"] == {
+        "days_ahead": 2,
+        "overdue": {"jobs": 2, "contacts": 2},
+        "due_soon": {"jobs": 3, "contacts": 2},
+    }
+    # Without settings: no deadline and no goals.
+    assert result["deadline"] is None
+    assert result["days_to_deadline"] is None
+    assert result["goals"] == {"applications_per_week": None, "interview_rate": None}
+    json.dumps(result)
+
+
+def test_funnel_metrics_count_more_weeks_including_empty_ones(connection, reference_date):
+    weeks = summary.funnel_metrics(connection, reference_date, weeks=8)["applications_per_week"]
+    # W05: job 13 (02-01, a Sunday). W06: job 14 (02-05). W07: jobs 7 (02-10) and 6 (02-15).
+    # W08: job 5 (02-20). Job 12 (01-10) is older than the eight weeks.
+    assert [(week["week"], week["applications"]) for week in weeks] == [
+        ("2026-W05", 1),
+        ("2026-W06", 1),
+        ("2026-W07", 2),
+        ("2026-W08", 1),
+        ("2026-W09", 1),
+        ("2026-W10", 2),
+        ("2026-W11", 1),
+        ("2026-W12", 0),
+    ]
+    one = summary.funnel_metrics(connection, date(2026, 3, 15), weeks=1)["applications_per_week"]
+    assert one == [  # a Sunday: its week started on Monday 03-09
+        {"week": "2026-W11", "start": "2026-03-09", "end": "2026-03-15", "applications": 1}
+    ]
+    across_years = summary.funnel_metrics(connection, date(2026, 1, 1), weeks=1)
+    assert across_years["applications_per_week"][0]["week"] == "2026-W01"
+    assert across_years["applications_per_week"][0]["start"] == "2025-12-29"
+
+
+def test_funnel_metrics_without_applications_give_a_null_rate(tmp_path, reference_date):
+    empty = db.connect(tmp_path / "empty.db")
+    try:
+        db.create_schema(empty)
+        result = summary.funnel_metrics(empty, reference_date)
+    finally:
+        empty.close()
+    assert result["interview_rate"] == {"reached_interview": 0, "applied": 0, "rate": None}
+    assert result["active_total"] == 0
+    assert set(result["active_by_status"].values()) == {0}
+    assert [week["applications"] for week in result["applications_per_week"]] == [0, 0, 0, 0]
+    assert result["active_with_referral"] == result["active_without_referral"] == 0
+
+
+def test_funnel_metrics_bring_the_goals_and_the_deadline_of_the_settings(
+    connection, reference_date
+):
+    settings = Settings(deadline=date(2026, 4, 30), applications_per_week=5, interview_rate=0.3)
+    result = summary.funnel_metrics(connection, reference_date, settings=settings)
+    assert result["deadline"] == "2026-04-30"
+    assert result["days_to_deadline"] == 45  # 15 days left in March + 30 in April
+    assert result["goals"] == {"applications_per_week": 5, "interview_rate": 0.3}
+    past = summary.funnel_metrics(connection, date(2026, 5, 2), settings=settings)
+    assert past["days_to_deadline"] == -2
+
+
+def test_funnel_metrics_count_on_hold_and_a_new_stage(connection, reference_date):
+    # Job 2 goes on hold (still active) and job 3 gets an hr stage: it reached an interview.
+    write(
+        connection,
+        jobs.plan_update_job(connection, 2, "usuário", reference_date, status="on_hold"),
+    )
+    write(
+        connection,
+        jobs.plan_add_stage(
+            connection, 3, "hr", reference_date, source="user", reference_date=reference_date
+        ),
+    )
+    result = summary.funnel_metrics(connection, reference_date)
+    assert result["active_by_status"]["on_hold"] == 1
+    assert result["active_by_status"]["applied"] == 1
+    assert result["active_total"] == 11
+    assert result["interview_rate"] == {"reached_interview": 6, "applied": 10, "rate": 0.6}
+
+
+def test_funnel_metrics_reject_invalid_date_and_weeks(connection, reference_date):
+    assert summary.funnel_metrics(connection, "16/03/2026")["error"] == "invalid_date"
+    for weeks in (0, 53, -1, True, 2.0, "4"):
+        result = summary.funnel_metrics(connection, reference_date, weeks=weeks)
+        assert result["error"] == "invalid_input", weeks
+        assert "weeks" in result["detail"]
+    assert (
+        len(summary.funnel_metrics(connection, reference_date, weeks=52)["applications_per_week"])
+        == 52
+    )
+
+
+def test_funnel_metrics_do_not_write_to_the_database(connection, reference_date):
+    before = connection.total_changes
+    summary.funnel_metrics(connection, reference_date, weeks=52)
+    assert connection.total_changes == before
