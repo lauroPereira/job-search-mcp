@@ -3,7 +3,7 @@ from datetime import date
 
 from helpers import write
 
-from job_search_mcp import contacts, domain, jobs
+from job_search_mcp import contacts, domain, jobs, summary
 
 
 def count(connection, table):
@@ -269,3 +269,94 @@ def test_list_contacts_company_filter_ignores_case_accents_and_spaces(connection
     for spelling in ("Transportadora Pampa", "TRANSPORTADORA PAMPA", " transportadora  pampá "):
         assert [c["id"] for c in contacts.list_contacts(connection, company=spelling)] == [3]
     assert contacts.list_contacts(connection, company="Transportadora") == []
+
+
+def save_person(connection, **arguments):
+    return contacts.plan_save_person(
+        connection, **{"source": "conversation", "reference_date": date(2026, 3, 16), **arguments}
+    )
+
+
+def history_of(connection, entity, record_id):
+    query = (
+        "SELECT field, old_value, new_value FROM history"
+        " WHERE entity = ? AND record_id = ? ORDER BY id"
+    )
+    return [tuple(row) for row in connection.execute(query, (entity, record_id))]
+
+
+def test_save_person_with_a_new_company_plans_both_creations(connection):
+    companies_before = count(connection, "company")
+    plan = save_person(connection, name="Iara Nova", company=" Empresa Zeta ", role_title="CTO")
+    assert [(c["entity"], c["record_id"], c["field"], c["new_value"]) for c in plan.changes] == [
+        ("company", None, "name", "Empresa Zeta"),
+        ("contact", None, "name", "Iara Nova"),
+        ("contact", None, "company", "Empresa Zeta"),
+        ("contact", None, "role_title", "CTO"),
+        ("contact", None, "status", "to_contact"),
+    ]
+    assert count(connection, "company") == companies_before
+    contact = write(connection, plan)["contact"]
+    assert (contact["name"], contact["company"], contact["status"]) == (
+        "Iara Nova",
+        "Empresa Zeta",
+        "to_contact",
+    )
+    assert count(connection, "company") == companies_before + 1
+    assert history_of(connection, "company", contact["company_id"]) == [
+        ("name", None, "Empresa Zeta")
+    ]
+    assert history_of(connection, "contact", contact["id"]) == [
+        ("name", None, "Iara Nova"),
+        ("company", None, "Empresa Zeta"),
+        ("role_title", None, "CTO"),
+        ("status", None, "to_contact"),
+    ]
+
+
+def test_save_person_finds_the_company_by_normalized_name(connection):
+    plan = save_person(connection, name="João Exemplo", company="banco  AURORA")
+    assert [c["entity"] for c in plan.changes] == ["contact"] * 3
+    contact = write(connection, plan)["contact"]
+    assert (contact["company"], contact["company_id"]) == ("Banco Aurora", 1)
+
+
+def test_save_person_changes_only_the_informed_fields(connection):
+    before = contacts.get_contact(connection, 2)
+    plan = save_person(connection, contact_id=2, role_title="Tech Recruiter")
+    assert plan.base_versions == {"contact:2": 1}
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in plan.changes] == [
+        ("role_title", None, "Tech Recruiter")
+    ]
+    after = write(connection, plan)["contact"]
+    assert after == {**before, "role_title": "Tech Recruiter"}
+    assert connection.execute("SELECT version FROM contact WHERE id = 2").fetchone()[0] == 2
+
+
+def test_save_person_moves_the_person_to_another_company_recorded_by_name(connection):
+    contact = write(
+        connection,
+        save_person(connection, contact_id=7, name="Gabriela Ensaio", company="Loja Horizonte"),
+    )["contact"]
+    assert (contact["company"], contact["company_id"]) == ("Loja Horizonte", 2)
+    assert history_of(connection, "contact", 7) == [
+        ("company", "Consultoria Tangará", "Loja Horizonte")
+    ]
+
+
+def test_save_person_on_hold_leaves_the_follow_ups(connection, reference_date):
+    pending = summary.pending_followups(connection, reference_date)
+    assert 1 in [contact["id"] for contact in pending["contacts"]]
+    contact = write(connection, save_person(connection, contact_id=1, status="on_hold"))["contact"]
+    assert (contact["status"], contact["follow_up"]) == ("on_hold", None)
+    pending = summary.pending_followups(connection, reference_date)
+    assert 1 not in [contact["id"] for contact in pending["contacts"]]
+
+
+def test_save_person_validation_errors(connection):
+    assert save_person(connection, name=" ")["error"] == "invalid_input"
+    assert save_person(connection, role_title="CTO")["error"] == "invalid_input"
+    assert save_person(connection, name="X", status="ghosted")["error"] == "invalid_status"
+    assert save_person(connection, name="X", contact_id=99)["error"] == "not_found"
+    assert save_person(connection, name="X", source="")["error"] == "invalid_input"
+    assert save_person(connection, name="X", reference_date="x")["error"] == "invalid_date"

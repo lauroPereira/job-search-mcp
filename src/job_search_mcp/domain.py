@@ -42,6 +42,11 @@ CONTACT_STATUSES = (
 CONTACT_CLOSED_STATUSES = frozenset({"closed"})
 CONTACT_NO_FOLLOW_UP_STATUSES = frozenset({"to_contact", "on_hold", "closed"})
 
+# Priority the user gives a company, and the one suggested when the company has an active
+# person (not closed) or an active application (not in a closed status).
+COMPANY_PRIORITIES = ("A", "B", "C")
+SUGGESTED_PRIORITY = "A"
+
 # Types of origin written in the history. Free text given as a source is stored as
 # USER_SOURCE, with the text as the reference.
 SOURCE_TYPES = ("conversation", "print", "audio", "email", "meeting", "import", "user")
@@ -81,8 +86,9 @@ def error(code: str, detail: str, **extra) -> dict:
     """Build the structured business error every operation returns instead of raising.
 
     `error` is a stable code (invalid_status, duplicate_url, not_found, invalid_date,
-    invalid_input, stale_proposal, expired_proposal) and `detail` a message the agent can
-    relay. Extra keys carry context, such as the valid statuses or the existing job.
+    invalid_input, stale_proposal, expired_proposal, duplicate_company) and `detail` a
+    message the agent can relay. Extra keys carry context, such as the valid statuses or
+    the existing job.
     """
     return {"error": code, "detail": detail, **extra}
 
@@ -116,11 +122,26 @@ def invalid_track(track) -> dict:
     )
 
 
+def invalid_priority(priority) -> dict:
+    return error(
+        "invalid_input",
+        f"Invalid priority '{priority}'. Valid priorities: {', '.join(COMPANY_PRIORITIES)}.",
+        valid_priorities=list(COMPANY_PRIORITIES),
+    )
+
+
 def invalid_score(score) -> dict:
     return error(
         "invalid_input",
         f"Invalid score '{score}'. Use a number from {SCORE_MIN} to {SCORE_MAX}.",
     )
+
+
+def optional_text(value: str | None) -> str | None:
+    """Text informed by the user without surrounding spaces; None when missing or blank."""
+    if value is None or not value.strip():
+        return None
+    return value.strip()
 
 
 def is_valid_score(score) -> bool:
