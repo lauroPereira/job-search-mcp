@@ -1,6 +1,6 @@
 # Especificação: domínios Currículo, Network e Vagas (v0.2)
 
-Status: **rascunho**, aguardando o [discovery](dominios-v0-2-discovery.md). Evolui o [servidor MCP](servidor-mcp-busca-de-emprego.md) da `v0.1.0`. O cliente com agentes, chat, RAG e avaliação fica no repositório separado `job-search-agent` ([decisão 0004](../architecture/decisions/0004-agente-em-repositorio-separado.md)).
+Status: **rascunho, a reescrever**. O [modelo de domínios](modelo-de-dominios.md) propõe que a `v0.2.0` seja a fatia "fonte única" e que o conteúdo abaixo (perfil e aderência) passe para a `v0.3.0` (questão D2). Esta especificação será reescrita depois das decisões do discovery. Evolui o [servidor MCP](servidor-mcp-busca-de-emprego.md) da `v0.1.0`. O cliente com agentes, chat, RAG e avaliação fica no repositório separado `job-search-agent` ([decisão 0004](../architecture/decisions/0004-agente-em-repositorio-separado.md)).
 
 ## Problema
 
@@ -70,5 +70,5 @@ O servidor guarda o currículo estruturado, as empresas e os requisitos das vaga
 
 ## Questões em aberto
 
-- **Q1.** Questões D1 a D7 do [discovery](dominios-v0-2-discovery.md). Bloqueia o plano. Responsável: autor.
+- **Q1.** Questões D1 a D7 do [modelo de domínios](modelo-de-dominios.md). Bloqueia o plano. Responsável: autor.
 - **Q2.** Pesos da nota de aderência (obrigatória × desejável, nível, faixa). Proposta no plano, aprovação do autor.
