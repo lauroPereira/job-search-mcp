@@ -1,16 +1,30 @@
-"""Job operations: list, add and update, recording every change in job_history."""
+"""Job operations: list, add and update, recording every change in the history.
+
+A job is read together with its application (1:1) and its company, with the same keys as
+in v0.1.0: `company` is the name of the company, plus the additive `company_id`.
+"""
 
 import sqlite3
 from datetime import date
 
-from job_search_mcp import domain
+from job_search_mcp import db, domain, history
 from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
 INITIAL_STATUS = "suggested"
 APPLIED_STATUS = "applied"
-# The only columns apply_job_changes may write: the column name goes into the UPDATE text.
-JOB_UPDATABLE_FIELDS = ("status", "next_step", "applied_on", "last_contact_on")
+# The fields of a job that update_job changes: they live in its application.
+JOB_UPDATABLE_FIELDS = history.UPDATABLE_FIELDS["application"]
+
+# Job, application and company joined, with the keys (and their order) of v0.1.0.
+JOB_SELECT = """
+SELECT job.id, company.name AS company, job.title, job.url, job.track, job.score,
+    application.status, application.next_step, application.applied_on,
+    application.last_contact_on, job.created_at, job.company_id
+FROM job
+JOIN application ON application.job_id = job.id
+JOIN company ON company.id = job.company_id
+"""
 
 
 def job_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
@@ -30,7 +44,7 @@ def job_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
 def get_job(
     connection: sqlite3.Connection, job_id: int, settings: Settings | None = None
 ) -> dict | None:
-    row = connection.execute("SELECT * FROM job WHERE id = ?", (job_id,)).fetchone()
+    row = connection.execute(f"{JOB_SELECT} WHERE job.id = ?", (job_id,)).fetchone()
     return job_to_dict(row, settings) if row else None
 
 
@@ -46,15 +60,15 @@ def list_jobs(
         return domain.invalid_status(status, domain.JOB_STATUSES)
     conditions, parameters = [], []
     for condition, value in (
-        ("status = ?", status),
-        ("track = ?", track),
-        ("score >= ?", min_score),
+        ("application.status = ?", status),
+        ("job.track = ?", track),
+        ("job.score >= ?", min_score),
     ):
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    rows = connection.execute(f"SELECT * FROM job{where} ORDER BY id", parameters)
+    rows = connection.execute(f"{JOB_SELECT}{where} ORDER BY job.id", parameters)
     return [job_to_dict(row, settings) for row in rows]
 
 
@@ -82,18 +96,21 @@ def add_job(
     if score is not None and not domain.is_valid_score(score):
         return domain.invalid_score(score)
     url = url.strip()
-    existing = connection.execute("SELECT * FROM job WHERE url = ?", (url,)).fetchone()
+    existing = connection.execute("SELECT id FROM job WHERE url = ?", (url,)).fetchone()
     if existing:
         return domain.error(
             "duplicate_url",
             f"A job with this URL already exists (id {existing['id']}).",
-            job=job_to_dict(existing, settings),
+            job=get_job(connection, existing["id"], settings),
         )
     with connection:
         cursor = connection.execute(
-            "INSERT INTO job (company, title, url, track, score, status, next_step)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (company.strip(), title.strip(), url, track, score, INITIAL_STATUS, next_step),
+            "INSERT INTO job (company_id, title, url, track, score) VALUES (?, ?, ?, ?, ?)",
+            (db.ensure_company(connection, company), title.strip(), url, track, score),
+        )
+        connection.execute(
+            "INSERT INTO application (job_id, status, next_step) VALUES (?, ?, ?)",
+            (cursor.lastrowid, INITIAL_STATUS, next_step),
         )
     return get_job(connection, cursor.lastrowid, settings)
 
@@ -102,38 +119,34 @@ def apply_job_changes(
     connection: sqlite3.Connection,
     job: dict,
     changes: dict,
-    source: str,
+    source_type: str,
+    source_ref: str | None,
     changed_on: date,
 ) -> list[dict]:
-    """Write the fields that really change and one job_history line for each of them.
+    """Write the fields that really change in the application of the job, with history.
 
-    Does not commit: the caller owns the transaction. Returns the history lines created.
-    A field outside JOB_UPDATABLE_FIELDS raises ValueError before anything is written.
+    Does not commit: the caller owns the transaction. Returns the history lines created,
+    in the v0.1.0 format: job_id, date, field, old_value, new_value and source (the
+    reference of the origin when there is one, otherwise its type). A field outside
+    JOB_UPDATABLE_FIELDS raises ValueError before anything is written.
     """
-    unknown = [field for field in changes if field not in JOB_UPDATABLE_FIELDS]
-    if unknown:
-        raise ValueError(f"Fields not allowed in a job update: {', '.join(unknown)}.")
-    history = []
-    for field, new_value in changes.items():
-        old_value = job[field]
-        if new_value == old_value:
-            continue
-        connection.execute(f"UPDATE job SET {field} = ? WHERE id = ?", (new_value, job["id"]))
-        entry = {
+    application_id = connection.execute(
+        "SELECT id FROM application WHERE job_id = ?", (job["id"],)
+    ).fetchone()[0]
+    lines = history.record_changes(
+        connection, "application", application_id, job, changes, changed_on, source_type, source_ref
+    )
+    return [
+        {
             "job_id": job["id"],
-            "date": changed_on.isoformat(),
-            "field": field,
-            "old_value": old_value,
-            "new_value": new_value,
-            "source": source,
+            "date": line["date"],
+            "field": line["field"],
+            "old_value": line["old_value"],
+            "new_value": line["new_value"],
+            "source": line["source_ref"] or line["source_type"],
         }
-        connection.execute(
-            "INSERT INTO job_history (job_id, date, field, old_value, new_value, source)"
-            " VALUES (:job_id, :date, :field, :old_value, :new_value, :source)",
-            entry,
-        )
-        history.append(entry)
-    return history
+        for line in lines
+    ]
 
 
 def update_job(
@@ -147,9 +160,11 @@ def update_job(
     last_contact_on: str | date | None = None,
     settings: Settings | None = None,
 ) -> dict:
-    """Update the informed fields of a job and record each change in job_history.
+    """Update the informed fields of a job and record each change in the history.
 
-    `source` says where the change came from and `reference_date` (a date or ISO text) is
+    `source` says where the change came from: a known type of origin
+    (domain.SOURCE_TYPES) is stored as it is; any other text as the type 'user', with the
+    text as the reference. `reference_date` (a date or ISO text) is
     the date written in the history. Fields left as None are not touched. When the status
     changes to applied and the job has no application date, neither stored nor informed,
     `applied_on` is filled with the reference date, so the job starts to have a follow-up.
@@ -181,5 +196,7 @@ def update_job(
         changes["applied_on"] = changed_on.isoformat()
     changes = {field: value for field, value in changes.items() if value is not None}
     with connection:
-        history = apply_job_changes(connection, job, changes, source.strip(), changed_on)
-    return {"job": get_job(connection, job_id, settings), "history": history}
+        lines = apply_job_changes(
+            connection, job, changes, *history.split_source(source), changed_on
+        )
+    return {"job": get_job(connection, job_id, settings), "history": lines}

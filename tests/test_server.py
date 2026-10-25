@@ -220,7 +220,7 @@ def test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones(db_pat
         assert result["error"] == "invalid_status"
         assert valid in result["valid_statuses"]
         assert valid in result["detail"]
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
     assert rows(db_path, "SELECT COUNT(*) FROM interaction") == [(0,)]
 
 
@@ -240,13 +240,13 @@ def test_update_job_writes_history_dated_today(db_path):
     }
     assert all(line["date"] == "2026-03-16" for line in result["history"])
     assert all(line["source"] == "user" for line in result["history"])
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(3,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(3,)]
 
 
 def test_update_job_does_not_expose_reference_date(db_path):
     result = call("update_job", job_id=8, source="user", reference_date="2026-01-01")
     assert result.is_error is True
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
 
 
 def test_update_job_rejects_future_and_invalid_dates(db_path):
@@ -258,7 +258,7 @@ def test_update_job_rejects_future_and_invalid_dates(db_path):
         invalid = structured("update_job", job_id=1, source="user", **{field: "ontem"})
         assert invalid["error"] == "invalid_date"
         assert field in invalid["detail"]
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
     today = structured("update_job", job_id=1, source="user", last_contact_on="2026-03-16")
     assert today["job"]["last_contact_on"] == "2026-03-16"
 

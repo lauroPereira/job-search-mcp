@@ -8,11 +8,11 @@ from job_search_mcp.db import to_date
 
 
 def test_status_lists_match_the_plan():
-    assert len(domain.JOB_STATUSES) == 13
-    assert len(domain.CONTACT_STATUSES) == 6
+    assert len(domain.JOB_STATUSES) == 14
+    assert len(domain.CONTACT_STATUSES) == 7
     assert domain.JOB_CLOSED_STATUSES == {"hired", "rejected", "withdrawn", "closed"}
-    assert domain.JOB_NO_FOLLOW_UP_STATUSES == {"suggested", "to_apply", "blocked"}
-    assert domain.CONTACT_NO_FOLLOW_UP_STATUSES == {"to_contact", "closed"}
+    assert domain.JOB_NO_FOLLOW_UP_STATUSES == {"suggested", "to_apply", "blocked", "on_hold"}
+    assert domain.CONTACT_NO_FOLLOW_UP_STATUSES == {"to_contact", "on_hold", "closed"}
     assert domain.JOB_CLOSED_STATUSES | domain.JOB_NO_FOLLOW_UP_STATUSES < set(domain.JOB_STATUSES)
     assert domain.CONTACT_NO_FOLLOW_UP_STATUSES < set(domain.CONTACT_STATUSES)
 

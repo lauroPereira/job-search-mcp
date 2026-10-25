@@ -39,7 +39,7 @@ def count_by_status(connection, table):
     return {row["status"]: row["total"] for row in rows}
 
 
-def test_create_schema_creates_the_four_tables(tmp_path):
+def test_create_schema_creates_the_version_2_tables(tmp_path):
     conn = db.connect(tmp_path / "empty.db")
     try:
         db.create_schema(conn)
@@ -48,15 +48,27 @@ def test_create_schema_creates_the_four_tables(tmp_path):
             row["name"]
             for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
         }
+        version = conn.execute("PRAGMA user_version").fetchone()[0]
     finally:
         conn.close()
-    assert tables == {"job", "contact", "interaction", "job_history"}
+    assert tables == {
+        "company",
+        "job",
+        "application",
+        "application_stage",
+        "application_person",
+        "contact",
+        "interaction",
+        "history",
+    }
+    assert version == db.SCHEMA_VERSION == 2
+    assert not list(tmp_path.glob("*.bak"))  # a new database is not migrated
 
 
 def test_connect_enables_foreign_keys_and_named_rows(connection):
     assert connection.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     job = connection.execute("SELECT * FROM job WHERE id = 1").fetchone()
-    assert job["company"] == "Banco Aurora"
+    assert job["title"] == "Data Engineer"
 
 
 def test_connect_creates_missing_parent_directory(tmp_path):
@@ -70,17 +82,29 @@ def test_seed_loads_expected_counts(connection):
     assert count(connection, "job") == 15
     assert count(connection, "contact") == 8
     assert count(connection, "interaction") == 0
-    assert count(connection, "job_history") == 0
-    assert count_by_status(connection, "job") == EXPECTED_JOBS_BY_STATUS
+    assert count(connection, "application") == 15
+    assert count(connection, "company") == 16  # 15 job companies plus Consultoria Tangará
+    assert count(connection, "history") == 0
+    assert count_by_status(connection, "application") == EXPECTED_JOBS_BY_STATUS
     assert count_by_status(connection, "contact") == EXPECTED_CONTACTS_BY_STATUS
 
 
 def test_seed_empty_cells_become_null_and_links_resolve(connection):
-    job = connection.execute("SELECT * FROM job WHERE id = 2").fetchone()
-    assert job["applied_on"] == "2026-03-11"
-    assert job["last_contact_on"] is None
-    linked = connection.execute("SELECT COUNT(*) FROM contact WHERE job_id IS NOT NULL")
-    assert linked.fetchone()[0] == 6
+    application = connection.execute("SELECT * FROM application WHERE job_id = 2").fetchone()
+    assert application["applied_on"] == "2026-03-11"
+    assert application["last_contact_on"] is None
+    links = connection.execute(
+        "SELECT application.job_id, contact_id, role, confirmed FROM application_person"
+        " JOIN application ON application.id = application_id ORDER BY contact_id"
+    ).fetchall()
+    assert [tuple(link) for link in links] == [
+        (1, 1, "contact", 1),
+        (2, 2, "contact", 1),
+        (5, 3, "contact", 1),
+        (11, 4, "contact", 1),
+        (8, 5, "contact", 1),
+        (13, 6, "contact", 1),
+    ]
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
 
 
@@ -88,8 +112,8 @@ def test_duplicate_url_is_rejected(connection):
     url = connection.execute("SELECT url FROM job WHERE id = 1").fetchone()["url"]
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
-            "INSERT INTO job (company, title, url, status) VALUES (?, ?, ?, ?)",
-            ("Banco Aurora", "Data Engineer", url, "suggested"),
+            "INSERT INTO job (company_id, title, url) VALUES (?, ?, ?)",
+            (1, "Data Engineer", url),
         )
     assert count(connection, "job") == 15
 
@@ -97,8 +121,8 @@ def test_duplicate_url_is_rejected(connection):
 def test_job_without_url_is_rejected(connection):
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
-            "INSERT INTO job (company, title, status) VALUES (?, ?, ?)",
-            ("Banco Aurora", "Data Engineer", "suggested"),
+            "INSERT INTO job (company_id, title) VALUES (?, ?)",
+            (1, "Data Engineer"),
         )
     assert count(connection, "job") == 15
 
@@ -125,12 +149,34 @@ def test_failed_seed_load_leaves_no_partial_data(tmp_path):
         conn.close()
 
 
-def test_contact_with_unknown_job_is_rejected(connection):
+def test_contact_link_to_unknown_application_is_rejected(connection):
     with pytest.raises(sqlite3.IntegrityError):
         connection.execute(
-            "INSERT INTO contact (name, status, job_id) VALUES (?, ?, ?)",
-            ("Ana Exemplo", "to_contact", 999),
+            "INSERT INTO application_person (application_id, contact_id, role) VALUES (?, ?, ?)",
+            (999, 1, "contact"),
         )
+
+
+def test_company_names_are_joined_by_normalized_name(connection):
+    assert db.normalize_name("  Clínica BOREAL ") == "clinica boreal"
+    with connection:
+        same = db.ensure_company(connection, "clinica boreal")
+        other = db.ensure_company(connection, "Clínica Boreal Sul")
+    clinica = connection.execute("SELECT company_id FROM job WHERE id = 4").fetchone()[0]
+    assert same == clinica  # job 4 is at Clínica Boreal in the seed
+    assert other not in (same, None)
+    assert db.ensure_company(connection, "  ") is None
+    assert db.ensure_company(connection, None) is None
+
+
+def test_create_schema_refuses_an_unknown_version(tmp_path):
+    conn = db.connect(tmp_path / "future.db")
+    try:
+        conn.execute("PRAGMA user_version = 3")
+        with pytest.raises(sqlite3.DatabaseError, match="version 3"):
+            db.create_schema(conn)
+    finally:
+        conn.close()
 
 
 def test_default_db_path_uses_environment_variable(monkeypatch, tmp_path):

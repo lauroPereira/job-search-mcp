@@ -17,14 +17,16 @@ JOB_STATUSES = (
     "tech_interview",
     "manager_interview",
     "offer",
+    "on_hold",
     "hired",
     "rejected",
     "withdrawn",
     "closed",
 )
-# Closed statuses end the follow-up; the "no follow-up" ones have not started it yet.
+# Closed statuses end the follow-up; the "no follow-up" ones have not started it yet, or
+# paused it (on_hold, which still counts as active).
 JOB_CLOSED_STATUSES = frozenset({"hired", "rejected", "withdrawn", "closed"})
-JOB_NO_FOLLOW_UP_STATUSES = frozenset({"suggested", "to_apply", "blocked"})
+JOB_NO_FOLLOW_UP_STATUSES = frozenset({"suggested", "to_apply", "blocked", "on_hold"})
 
 CONTACT_STATUSES = (
     "to_contact",
@@ -32,10 +34,16 @@ CONTACT_STATUSES = (
     "in_conversation",
     "resume_sent",
     "referred",
+    "on_hold",
     "closed",
 )
 CONTACT_CLOSED_STATUSES = frozenset({"closed"})
-CONTACT_NO_FOLLOW_UP_STATUSES = frozenset({"to_contact", "closed"})
+CONTACT_NO_FOLLOW_UP_STATUSES = frozenset({"to_contact", "on_hold", "closed"})
+
+# Types of origin written in the history. Free text given as a source is stored as
+# USER_SOURCE, with the text as the reference.
+SOURCE_TYPES = ("conversation", "print", "audio", "email", "meeting", "import", "user")
+USER_SOURCE = "user"
 
 # Career tracks and the fit score range a job may be registered with.
 JOB_TRACKS = ("data", "systems", "product", "ai", "other")
