@@ -97,6 +97,27 @@ def test_add_job_with_duplicate_url_returns_error_and_creates_nothing(connection
     assert count(connection, "job") == 15
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "HTTPS://Vagas.Example.com/banco-aurora/data-engineer",
+        "https://vagas.example.com/banco-aurora/data-engineer/",
+        "https://vagas.example.com/banco-aurora/data-engineer#descricao",
+    ],
+)
+def test_add_job_finds_duplicates_by_the_normalized_url_as_the_import(connection, variant):
+    plan = jobs.plan_add_job(connection, "Banco Aurora", "Outro", variant, reference_date=ADDED_ON)
+    assert plan["error"] == "duplicate_url"
+    assert plan["job"]["id"] == 1
+    # Another query string is another job; the link is stored as it was given.
+    other = f"{NEW_URL}?id=2"
+    added = write(
+        connection,
+        jobs.plan_add_job(connection, "Banco Aurora", "Outro", other, reference_date=ADDED_ON),
+    )
+    assert added["url"] == other
+
+
 def test_add_job_twice_with_the_same_url_keeps_only_the_first(connection):
     first = write(
         connection,
@@ -510,7 +531,7 @@ def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(c
     assert plan.base_versions == {"application:3": 1}
     result = write(connection, plan)
     assert result["stage"] == {
-        "id": 1,
+        "id": 10,  # after the 9 stages of the seed
         "kind": "screening",
         "date": "2026-03-12",
         "result": "pending",
@@ -525,10 +546,10 @@ def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(c
         " WHERE entity = 'application_stage' ORDER BY id"
     ).fetchall()
     assert [tuple(row) for row in stage_lines] == [
-        (1, "application_id", "3", "2026-03-16", "email"),
-        (1, "kind", "screening", "2026-03-16", "email"),
-        (1, "date", "2026-03-12", "2026-03-16", "email"),
-        (1, "result", "pending", "2026-03-16", "email"),
+        (10, "application_id", "3", "2026-03-16", "email"),
+        (10, "kind", "screening", "2026-03-16", "email"),
+        (10, "date", "2026-03-12", "2026-03-16", "email"),
+        (10, "result", "pending", "2026-03-16", "email"),
     ]
 
 

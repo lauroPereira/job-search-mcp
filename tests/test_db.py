@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from job_search_mcp import db
+from job_search_mcp import db, transfer
 
 EXPECTED_JOBS_BY_STATUS = {
     "applied": 2,
@@ -85,7 +85,8 @@ def test_seed_loads_expected_counts(connection):
     assert count(connection, "interaction") == 0
     assert count(connection, "application") == 15
     assert count(connection, "company") == 16  # 15 job companies plus Consultoria Tangará
-    assert count(connection, "history") == 0
+    assert count(connection, "application_stage") == 9
+    assert count(connection, "history") == 0  # the demo data is a starting state
     assert count_by_status(connection, "application") == EXPECTED_JOBS_BY_STATUS
     assert count_by_status(connection, "contact") == EXPECTED_CONTACTS_BY_STATUS
 
@@ -100,13 +101,26 @@ def test_seed_empty_cells_become_null_and_links_resolve(connection):
     ).fetchall()
     assert [tuple(link) for link in links] == [
         (1, 1, "contact", 1),
+        (1, 1, "referrer", 1),
         (2, 2, "contact", 1),
         (5, 3, "contact", 1),
         (11, 4, "contact", 1),
+        (11, 4, "referrer", 0),
         (8, 5, "contact", 1),
         (13, 6, "contact", 1),
     ]
     assert connection.execute("PRAGMA foreign_key_check").fetchall() == []
+
+
+def test_seed_covers_company_priorities_stages_and_referrals(connection):
+    priorities = {row[0] for row in connection.execute("SELECT priority FROM company")}
+    assert priorities == {"A", "B", "C", None}
+    results = {row[0] for row in connection.execute("SELECT result FROM application_stage")}
+    assert results == {"passed", "failed", "pending"}
+    referrals = connection.execute(
+        "SELECT confirmed FROM application_person WHERE role = 'referrer' ORDER BY confirmed"
+    ).fetchall()
+    assert [row[0] for row in referrals] == [0, 1]
 
 
 def test_duplicate_url_is_rejected(connection):
@@ -128,24 +142,25 @@ def test_job_without_url_is_rejected(connection):
     assert count(connection, "job") == 15
 
 
-def test_second_seed_load_fails_and_keeps_the_first_load(connection):
-    with pytest.raises(sqlite3.IntegrityError):
-        db.load_seed(connection)
+def test_second_seed_load_finds_only_duplicates(connection):
+    report = transfer.load_seed(connection)
+    assert all(not file.new and not file.errors for file in report.files.values())
     assert count(connection, "job") == 15
     assert count(connection, "contact") == 8
 
 
-def test_failed_seed_load_leaves_no_partial_data(tmp_path):
+def test_seed_with_an_error_writes_nothing(tmp_path):
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    (seed / "companies.csv").write_text(
+        "name,priority\nEmpresa Boa,A\nEmpresa Ruim,Z\n", encoding="utf-8"
+    )
     conn = db.connect(tmp_path / "conflict.db")
     try:
         db.create_schema(conn)
-        # A contact that collides with the seed makes the load fail after the jobs are inserted.
-        conn.execute("INSERT INTO contact (id, name, status) VALUES (1, 'Ana Exemplo', 'closed')")
-        conn.commit()
-        with pytest.raises(sqlite3.IntegrityError):
-            db.load_seed(conn)
-        assert count(conn, "job") == 0
-        assert count(conn, "contact") == 1
+        with pytest.raises(ValueError, match="invalid priority 'Z'"):
+            transfer.load_seed(conn, seed)
+        assert count(conn, "company") == 0
     finally:
         conn.close()
 

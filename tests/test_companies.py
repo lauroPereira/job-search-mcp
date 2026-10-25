@@ -60,9 +60,10 @@ def test_suggested_priority_follows_the_person_status(connection):
 
 
 def test_list_companies_filters_by_the_stored_priority(connection):
-    assert companies.list_companies(connection, priority="B") == []
+    assert [company["id"] for company in companies.list_companies(connection, "B")] == [2, 9, 11]
     write(connection, save(connection, company_id=3, name="Seguradora Vértice", priority="B"))
-    assert [company["id"] for company in companies.list_companies(connection, "B")] == [3]
+    listed = companies.list_companies(connection, "B")
+    assert [company["id"] for company in listed] == [2, 3, 9, 11]
     error = companies.list_companies(connection, priority="Z")
     assert error["error"] == "invalid_input"
     assert error["valid_priorities"] == ["A", "B", "C"]

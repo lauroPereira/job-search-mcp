@@ -1,5 +1,6 @@
 """Migration of a v0.1.0 database (schema version 0) to the version 2."""
 
+import csv
 import sqlite3
 import threading
 from pathlib import Path
@@ -7,9 +8,20 @@ from pathlib import Path
 import pytest
 from helpers import write
 
-from job_search_mcp import contacts, db, jobs
+from job_search_mcp import contacts, db, jobs, transfer
 
-SCHEMA_V1 = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text(encoding="utf-8")
+FIXTURES = Path(__file__).parent / "fixtures"
+SCHEMA_V1 = (FIXTURES / "schema_v1.sql").read_text(encoding="utf-8")
+# The seed of v0.1.0 (its CSV format, with ids), kept as a fixture: data/seed/ moved to the
+# import format in v0.2.0.
+SEED_V1 = FIXTURES / "seed_v1"
+
+
+def read_v1(name):
+    """Rows of a v0.1.0 seed file as dicts, with empty cells as None."""
+    with (SEED_V1 / name).open(encoding="utf-8", newline="") as file:
+        return [{key: value or None for key, value in row.items()} for row in csv.DictReader(file)]
+
 
 # Extra synthetic rows on top of the seed: contacts whose company differs from a job's only
 # in case, accents and spaces, a contact without company, one with a blank company,
@@ -43,13 +55,8 @@ def create_v1_database(path: Path) -> None:
     conn = sqlite3.connect(path)
     try:
         conn.executescript(SCHEMA_V1)
-        job_rows = [
-            tuple(row.values()) for row in db._read_csv(db.SEED_DIR / "jobs.csv", db.JOB_COLUMNS)
-        ]
-        contact_rows = [
-            tuple(row.values())
-            for row in db._read_csv(db.SEED_DIR / "contacts.csv", db.CONTACT_COLUMNS)
-        ]
+        job_rows = [tuple(row.values()) for row in read_v1("jobs.csv")]
+        contact_rows = [tuple(row.values()) for row in read_v1("contacts.csv")]
         with conn:
             conn.executemany(f"INSERT INTO job VALUES ({', '.join('?' * 11)})", job_rows)
             conn.executemany(
@@ -91,12 +98,50 @@ def migrated(v1_path):
     conn.close()
 
 
+def write_import_folder(folder: Path) -> None:
+    """The v0.1.0 seed written in the import format: companies, jobs, people and links."""
+    folder.mkdir()
+    v1_jobs = read_v1("jobs.csv")
+    urls = {row["id"]: row["url"] for row in v1_jobs}
+    # Companies in the order v0.1.0 met them (jobs first, then contacts), so the ids match.
+    names = [row["company"] for row in v1_jobs + read_v1("contacts.csv") if row["company"]]
+    files = {
+        "companies.csv": [{"name": name} for name in dict.fromkeys(names)],
+        "jobs.csv": [
+            {column: row[column] for column in transfer.COLUMNS["jobs.csv"] if column in row}
+            for row in v1_jobs
+        ],
+        "people.csv": [
+            {column: row[column] for column in transfer.COLUMNS["people.csv"] if column in row}
+            for row in read_v1("contacts.csv")
+        ],
+        "links.csv": [
+            {
+                "job_url": urls[row["job_id"]],
+                "person": row["name"],
+                "person_company": row["company"],
+                "role": "contact",
+                "confirmed": "true",
+            }
+            for row in read_v1("contacts.csv")
+            if row["job_id"]
+        ],
+    }
+    for name, rows in files.items():
+        with (folder / name).open("w", encoding="utf-8", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+
+
 @pytest.fixture
 def fresh(tmp_path):
-    """A v0.2.0 database created new, with the seed: what the migration must match."""
+    """A v0.2.0 database created new, with the v0.1.0 seed imported: what the migration
+    must match."""
+    write_import_folder(tmp_path / "seed_v1")
     conn = db.connect(tmp_path / "fresh.db")
     db.create_schema(conn)
-    db.load_seed(conn)
+    transfer.load_seed(conn, tmp_path / "seed_v1")
     yield conn
     conn.close()
 
