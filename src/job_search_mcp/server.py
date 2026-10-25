@@ -186,7 +186,13 @@ def list_contacts(
         Field(description=f"Keep only contacts in this status. {CONTACT_STATUS_HELP}"),
     ] = None,
     company: Annotated[
-        str | None, Field(description="Keep only contacts of this company (whole name).")
+        str | None,
+        Field(
+            description=(
+                "Keep only contacts of this company (whole name; case, accents and extra "
+                "spaces are ignored)."
+            )
+        ),
     ] = None,
 ) -> dict[str, Any]:
     """List the networking contacts, ordered by id, optionally filtered.

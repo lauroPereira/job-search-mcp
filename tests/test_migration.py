@@ -1,6 +1,7 @@
 """Migration of a v0.1.0 database (schema version 0) to the version 2."""
 
 import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -9,8 +10,9 @@ from job_search_mcp import contacts, db, jobs
 
 SCHEMA_V1 = (Path(__file__).parent / "fixtures" / "schema_v1.sql").read_text(encoding="utf-8")
 
-# Extra synthetic rows on top of the seed: a contact whose company differs from a job's only
-# in case, accents and spaces, a contact without company, interactions and job history.
+# Extra synthetic rows on top of the seed: contacts whose company differs from a job's only
+# in case, accents and spaces, a contact without company, one with a blank company,
+# interactions and job history.
 EXTRA_CONTACTS = [
     (
         9,
@@ -24,6 +26,8 @@ EXTRA_CONTACTS = [
         1,
     ),
     (10, "Júlia Sem Empresa", None, "Amiga", "whatsapp", "to_contact", None, None, None),
+    (11, "Kauã Espaços", "   ", "Colega", "email", "to_contact", None, None, None),
+    (12, "Lia Dupla", "Banco  Aurora", "Colega", "email", "to_contact", None, None, None),
 ]
 INTERACTIONS = [(1, "2026-03-08", "Pediu indicação"), (2, "2026-03-11", "Combinou horários")]
 JOB_HISTORY = [
@@ -100,7 +104,7 @@ def test_migration_reaches_version_2_and_keeps_every_row(migrated):
     assert user_version(migrated) == 2
     assert count(migrated, "job") == 15
     assert count(migrated, "application") == 15
-    assert count(migrated, "contact") == 10
+    assert count(migrated, "contact") == 12
     assert count(migrated, "interaction") == 2
     assert count(migrated, "history") == 3
     tables = {
@@ -114,26 +118,30 @@ def test_migration_reaches_version_2_and_keeps_every_row(migrated):
 
 def test_migration_copies_the_database_before_changing_it(v1_path, migrated):
     backup = v1_path.with_name("job_search.db.v1.bak")
-    assert db.backup_path(v1_path) == backup
+    assert backup.exists()
     copy = sqlite3.connect(backup)
     try:
         assert user_version(copy) == 0
         assert count(copy, "job_history") == 3
-        assert count(copy, "contact") == 10
+        assert count(copy, "contact") == 12
     finally:
         copy.close()
 
 
 def test_migration_joins_companies_by_normalized_name(migrated):
-    # 15 job companies plus Consultoria Tangará; "  banco ÁURORA " joins Banco Aurora.
+    # 15 job companies plus Consultoria Tangará; "  banco ÁURORA " and "Banco  Aurora"
+    # join Banco Aurora; a blank company becomes null (v0.1.0 returned the blank text).
     assert count(migrated, "company") == 16
     igor = contacts.get_contact(migrated, 9)
     assert igor["company"] == "Banco Aurora"
     assert igor["company_id"] == jobs.get_job(migrated, 1)["company_id"]
     assert contacts.get_contact(migrated, 10)["company"] is None
     assert contacts.get_contact(migrated, 10)["company_id"] is None
-    banco = [c["id"] for c in contacts.list_contacts(migrated, company="BANCO AURORA")]
-    assert banco == [1, 9]
+    assert contacts.get_contact(migrated, 11)["company"] is None
+    assert contacts.get_contact(migrated, 12)["company"] == "Banco Aurora"
+    for spelling in ("BANCO AURORA", "banco áurora", " Banco  ÁURORA "):
+        banco = [c["id"] for c in contacts.list_contacts(migrated, company=spelling)]
+        assert banco == [1, 9, 12]
 
 
 def test_migration_moves_job_links_to_application_person(migrated):
@@ -220,7 +228,7 @@ def test_migrated_database_accepts_writes(migrated):
 
 
 def test_opening_again_does_not_migrate_twice(v1_path, migrated):
-    backup = db.backup_path(v1_path)
+    backup = v1_path.with_name("job_search.db.v1.bak")
     backup.unlink()
     db.create_schema(migrated)
     reopened = db.connect(v1_path)
@@ -232,6 +240,7 @@ def test_opening_again_does_not_migrate_twice(v1_path, migrated):
     finally:
         reopened.close()
     assert not backup.exists()
+    assert not list(v1_path.parent.glob("*.bak"))
 
 
 def test_failed_migration_leaves_the_v1_database_untouched(tmp_path):
@@ -247,8 +256,12 @@ def test_failed_migration_leaves_the_v1_database_untouched(tmp_path):
     conn.close()
     conn = db.connect(path)
     try:
-        with pytest.raises(sqlite3.IntegrityError, match="missing jobs"):
+        with pytest.raises(sqlite3.IntegrityError, match="missing jobs") as failure:
             db.create_schema(conn)
+        # The message names the ids to fix and where the copy is.
+        assert "job_history ids [4]" in str(failure.value)
+        assert "contact ids []" in str(failure.value)
+        assert str(path.with_name("broken.db.v1.bak")) in str(failure.value)
         assert user_version(conn) == 0
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -258,7 +271,7 @@ def test_failed_migration_leaves_the_v1_database_untouched(tmp_path):
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
     finally:
         conn.close()
-    assert db.backup_path(path).exists()
+    assert path.with_name("broken.db.v1.bak").exists()
 
 
 def test_in_memory_v1_database_migrates_without_backup(tmp_path, monkeypatch):
@@ -277,3 +290,96 @@ def test_in_memory_v1_database_migrates_without_backup(tmp_path, monkeypatch):
     finally:
         conn.close()
     assert not list(tmp_path.iterdir())
+
+
+def test_migration_reports_the_backup_and_the_joined_companies_on_stderr(v1_path, capsys):
+    conn = db.connect(v1_path)
+    try:
+        db.create_schema(conn)
+    finally:
+        conn.close()
+    captured = capsys.readouterr()
+    assert captured.out == ""  # stdout carries the MCP protocol
+    lines = captured.err.splitlines()
+    assert str(v1_path.with_name("job_search.db.v1.bak")) in lines[0]
+    assert lines[1:] == [
+        "Company '  banco ÁURORA ' stored as 'Banco Aurora'.",
+        "Company 'Banco  Aurora' stored as 'Banco Aurora'.",
+    ]
+
+
+def test_an_existing_backup_is_never_overwritten(v1_path):
+    old_backup = v1_path.with_name("job_search.db.v1.bak")
+    old_backup.write_bytes(b"older copy")
+    conn = db.connect(v1_path)
+    try:
+        db.create_schema(conn)
+    finally:
+        conn.close()
+    assert old_backup.read_bytes() == b"older copy"
+    copy = sqlite3.connect(v1_path.with_name("job_search.db.v1.1.bak"))
+    try:
+        assert user_version(copy) == 0
+        assert count(copy, "job_history") == 3
+    finally:
+        copy.close()
+    assert db.backup_path(v1_path) == v1_path.with_name("job_search.db.v1.2.bak")
+
+
+def test_second_connection_that_read_the_old_version_does_not_migrate_again(v1_path, monkeypatch):
+    """Two openings interleaved: both read version 0 before either takes the write lock."""
+    first = db.connect(v1_path)
+    second = db.connect(v1_path)
+    try:
+        db.create_schema(first)  # the first one migrates
+        real_user_version = db._user_version
+        stale_reads = [0]  # the second one read version 0 before the first one committed
+
+        def stale_first_read(connection):
+            if connection is second and stale_reads:
+                return stale_reads.pop()
+            return real_user_version(connection)
+
+        monkeypatch.setattr(db, "_user_version", stale_first_read)
+        db.create_schema(second)  # re-reads the version under the lock: nothing to do
+        assert user_version(second) == 2
+        assert count(second, "history") == 3
+    finally:
+        first.close()
+        second.close()
+    assert sorted(path.name for path in v1_path.parent.glob("*.bak")) == ["job_search.db.v1.bak"]
+    copy = sqlite3.connect(v1_path.with_name("job_search.db.v1.bak"))
+    try:
+        assert user_version(copy) == 0  # still the v0.1.0 database
+    finally:
+        copy.close()
+
+
+def test_two_threads_opening_the_same_v1_database_migrate_it_once(v1_path):
+    barrier = threading.Barrier(2)
+    failures = []
+
+    def open_database():
+        conn = db.connect(v1_path)
+        try:
+            barrier.wait()
+            db.create_schema(conn)
+        except Exception as failure:  # noqa: BLE001 - reported to the main thread
+            failures.append(failure)
+        finally:
+            conn.close()
+
+    threads = [threading.Thread(target=open_database) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == []
+    assert [path.name for path in v1_path.parent.glob("*.bak")] == ["job_search.db.v1.bak"]
+    conn = db.connect(v1_path)
+    try:
+        assert user_version(conn) == 2
+        assert count(conn, "job") == 15
+        assert count(conn, "history") == 3
+    finally:
+        conn.close()

@@ -8,7 +8,7 @@ role 'contact' (null when there is none). `company_id` and `role_title` are addi
 import datetime
 import sqlite3
 
-from job_search_mcp import domain, history, jobs
+from job_search_mcp import db, domain, history, jobs
 from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
@@ -62,14 +62,15 @@ def list_contacts(
 ) -> list[dict] | dict:
     """List contacts ordered by id, optionally filtered by status and company.
 
-    The company filter matches the whole name, ignoring case for unaccented letters.
+    The company filter matches the whole name, compared by normalized name (db.normalize_name:
+    case, accents and extra spaces are ignored).
     """
     if status is not None and status not in domain.CONTACT_STATUSES:
         return domain.invalid_status(status, domain.CONTACT_STATUSES)
     conditions, parameters = [], []
     for condition, value in (
         ("contact.status = ?", status),
-        ("company.name = ? COLLATE NOCASE", company),
+        ("company.normalized_name = ?", db.normalize_name(company) if company else company),
     ):
         if value is not None:
             conditions.append(condition)

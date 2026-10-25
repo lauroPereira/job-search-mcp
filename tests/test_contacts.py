@@ -214,3 +214,9 @@ def test_log_interaction_without_status_keeps_the_status_of_other_contacts(
     result = contacts.log_interaction(connection, 6, "Mensagem de cortesia", reference_date)
     assert result["contact"]["status"] == "closed"
     assert result["follow_up"] is None
+
+
+def test_list_contacts_company_filter_ignores_case_accents_and_spaces(connection):
+    for spelling in ("Transportadora Pampa", "TRANSPORTADORA PAMPA", " transportadora  pampá "):
+        assert [c["id"] for c in contacts.list_contacts(connection, company=spelling)] == [3]
+    assert contacts.list_contacts(connection, company="Transportadora") == []

@@ -159,6 +159,7 @@ def test_contact_link_to_unknown_application_is_rejected(connection):
 
 def test_company_names_are_joined_by_normalized_name(connection):
     assert db.normalize_name("  Clínica BOREAL ") == "clinica boreal"
+    assert db.normalize_name("Clínica   Boreal") == "clinica boreal"
     with connection:
         same = db.ensure_company(connection, "clinica boreal")
         other = db.ensure_company(connection, "Clínica Boreal Sul")
