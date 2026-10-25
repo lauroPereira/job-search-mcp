@@ -2,7 +2,7 @@
 
 Servidor [MCP](https://modelcontextprotocol.io) que dá a um agente de IA as ferramentas para gerir uma busca de emprego: empresas, vagas e candidaturas com etapas, contatos de networking, follow-ups, um resumo do que fazer hoje e as métricas do funil.
 
-> **Estado:** a versão estável é a `v0.1.0`, em `main`, com sete ferramentas. A **`v0.2.0` está em preparação em `develop`** (17 ferramentas, gravação em duas etapas, importação de CSV, migração automática); `main` continua na `v0.1.0` até a promoção. Este README descreve a `v0.2.0`. A `v0.1.0` foi verificada por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)) e em conversa real no Claude Code ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)). A `v0.2.0` foi verificada por cliente programático ([evidência](docs/evidence/2026-10-25-verificacao-v0-2.md)); a conversa real no Claude Code ainda está pendente. O Claude Desktop não foi verificado.
+> **Estado:** versão `v0.2.0` ([notas](docs/releases/v0.2.0.md)): 17 ferramentas, gravação em duas etapas, importação de CSV e migração automática de um banco da `v0.1.0`. A versão estável fica em `main` e o desenvolvimento em `develop`. A `v0.1.0` foi verificada por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)) e em conversa real no Claude Code ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)). A `v0.2.0` foi verificada por cliente programático ([evidência](docs/evidence/2026-10-25-verificacao-v0-2.md)); a conversa real no Claude Code ainda está pendente. O Claude Desktop não foi verificado.
 
 ## Por que este projeto existe
 
@@ -91,7 +91,7 @@ Regras principais:
 - **Etapas:** `kind` é `screening`, `test`, `culture_fit`, `hr`, `technical`, `manager` ou `offer`; `result` é `pending`, `passed`, `failed` ou `cancelled`. **Papéis** de `jobs_link_person`: `referrer`, `recruiter`, `hiring_manager`, `contact`.
 - **Prioridade da vaga** (calculada, não gravada): `high` com nota de pelo menos 7,5 ou indicação (`referrer`) confirmada; `medium` com nota de pelo menos 7; `low` nos demais casos. **Prioridade da empresa:** `A`, `B`, `C` ou nula, escolhida pela pessoa; `suggested_priority` é `A` quando a empresa tem pessoa ativa ou candidatura ativa.
 - **Trilha e nota no cadastro:** em `add_job`, `track` deve ser um de `data`, `systems`, `product`, `ai`, `other`, e `score` um número de 0 a 10.
-- **O que foi enviado com a candidatura** (`update_job`): `resume_track` é a trilha do currículo enviado, uma das trilhas acima; `salary_ask` (pretensão) e `contract_type` (regime, como CLT ou PJ) são texto livre curto.
+- **O que foi enviado com a candidatura** (`update_job`): `resume_track` é a trilha do currículo enviado, uma das trilhas acima; `salary_ask` (pretensão) e `contract_type` (regime, como CLT ou PJ) são texto livre de até 100 caracteres. Os três não aceitam texto vazio ou só com espaços.
 - **Taxa de entrevista:** candidaturas com data de candidatura que chegaram a um status de entrevista, `offer` ou `hired`, ou a uma etapa `hr`, `technical`, `manager` ou `offer` não cancelada, divididas pelas candidaturas com data de candidatura.
 - **Erros de negócio** voltam como um objeto com `error` (código) e `detail` (mensagem), para o agente explicar o que houve. Os códigos são `duplicate_url`, `duplicate_company`, `duplicate_stage`, `duplicate_link`, `invalid_status`, `invalid_date` (data inválida ou futura), `invalid_input` (campo obrigatório ou origem vazios, valor fora da lista ou da faixa), `not_found`, `stale_proposal` e `expired_proposal`.
 
@@ -123,7 +123,7 @@ Se a pessoa recusar, o agente chama `changes_discard` e nada muda no banco. A co
 
 Requisitos: Python 3.12 ou mais novo e Git.
 
-A versão estável fica em `main` e o desenvolvimento em `develop`. Os comandos abaixo clonam a versão estável; para a `v0.2.0` antes da promoção, acrescente `--branch develop`.
+A versão estável fica em `main` e o desenvolvimento em `develop`. Os comandos abaixo clonam a versão estável; para a de desenvolvimento, acrescente `--branch develop`.
 
 Linux e macOS (nesses sistemas o interpretador costuma se chamar `python3`; depois de ativar o ambiente virtual, `python` e `pip` já são os dele):
 
@@ -390,10 +390,9 @@ As ferramentas não acessam a rede, não executam comandos e só leem e gravam n
 
 - **Aprovação humana depende do cliente.** O servidor garante que nada é gravado sem uma segunda chamada (`changes_confirm`) e que a proposta é revalidada nela, mas não distingue um agente que confirma sem perguntar à pessoa. A pergunta entre a proposta e a confirmação depende do agente e do cliente.
 - **"Hoje" e as datas gravadas.** O "hoje" das ferramentas (padrão das datas, limite para data futura e data das linhas de histórico) é a data local da máquina; `created_at` e `expires_at` são gravados em UTC. Perto da meia-noite, eles podem cair em dias diferentes. O histórico registra quando a mudança foi feita, não a data de referência pedida ao agente.
-- **Campos não podem ser limpos.** As ferramentas de escrita só alteram os campos informados; não há como voltar um campo opcional a nulo.
-- **`resume_track` na importação** é texto livre, enquanto `update_job` aceita só as trilhas; um valor importado fora delas fica gravado, mas não pode ser informado de novo por `update_job`.
+- **Campos não podem ser limpos.** As ferramentas de escrita só alteram os campos informados (valor omitido ou nulo não muda nada) e nenhuma volta um campo a nulo. Em `update_job`, `next_step` aceita texto vazio, como na `v0.1.0`; `resume_track`, `salary_ask` e `contract_type` recusam texto vazio.
 - **`track` e `score` são validados só no cadastro** (`add_job` e importação). Os filtros de `list_jobs` aceitam qualquer valor.
-- **Sistemas testados:** Windows 11, à mão e pela suíte; Ubuntu, pela suíte no CI. macOS não foi testado.
+- **Sistemas testados:** Windows 11: a `v0.1.0` à mão e pela suíte, a `v0.2.0` pela suíte e pelo cliente programático; Ubuntu, pela suíte no CI. macOS não foi testado.
 - **O caminho padrão do banco** (`data/local/job_search.db`) é calculado a partir do diretório do código e pressupõe instalação em modo editável a partir do clone, como descrito acima. Com outra forma de instalação, defina `JOB_SEARCH_DB`.
 - **Clientes verificados:** Claude Code no Windows, em conversa real, com a `v0.1.0`. A `v0.2.0` foi verificada só por cliente programático. Claude Desktop e os comandos de instalação de Linux e macOS não foram verificados à mão.
 
@@ -413,7 +412,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Os testes (354 na `v0.2.0`) usam bancos em diretórios temporários e não acessam a rede. Dois deles sobem o servidor como subprocesso e conversam com ele por stdio: um por `python -m job_search_mcp.server` e outro pelo executável instalado `job-search-mcp`.
+Os testes (363 na `v0.2.0`) usam bancos em diretórios temporários e não acessam a rede. Dois deles sobem o servidor como subprocesso e conversam com ele por stdio: um por `python -m job_search_mcp.server` e outro pelo executável instalado `job-search-mcp`.
 
 ## Como o projeto é desenvolvido
 
@@ -433,8 +432,8 @@ especificação → plano → tarefas → implementação → validação
 
 ## Roteiro
 
-1. **MVP (`v0.1.0`, publicada):** as sete ferramentas originais, com testes, dados sintéticos e verificação em conversa real no Claude Code.
-2. **Fonte única (`v0.2.0`, em preparação em `develop`):** empresas, candidaturas com etapas e vínculos com pessoas, gravação em duas etapas (proposta e confirmação), histórico único com origem, configuração local, importação das planilhas e métricas do funil ([especificação](docs/specs/fonte-unica-v0-2.md), [notas da versão](docs/releases/v0.2.0.md), [modelo de domínios](docs/specs/modelo-de-dominios.md)).
+1. **MVP (`v0.1.0`):** as sete ferramentas originais, com testes, dados sintéticos e verificação em conversa real no Claude Code.
+2. **Fonte única (`v0.2.0`):** empresas, candidaturas com etapas e vínculos com pessoas, gravação em duas etapas (proposta e confirmação), histórico único com origem, configuração local, importação das planilhas e métricas do funil ([especificação](docs/specs/fonte-unica-v0-2.md), [notas da versão](docs/releases/v0.2.0.md), [modelo de domínios](docs/specs/modelo-de-dominios.md)).
 3. **Perfil e aderência (`v0.3.0`):** currículo como dado, competências com evidência e aderência calculada de cada vaga ([rascunho](docs/specs/perfil-e-aderencia-v0-3.md)).
 4. **Desenvolvimento (`v0.4.0`):** estudos, cursos e certificações ligados às lacunas das vagas.
 5. **Agente em repositório separado:** o `job-search-agent` usa este servidor por MCP, com chat, dashboards, RAG, avaliação e aprovação humana antes de gravar ([decisão 0004](docs/architecture/decisions/0004-agente-em-repositorio-separado.md)).
