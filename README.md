@@ -48,9 +48,9 @@ Cada vaga tem uma candidatura (1:1); as ferramentas leem as duas juntas, com as 
 
 | Ferramenta | Tipo | Parâmetros | Retorno |
 |---|---|---|---|
-| `list_jobs` | leitura | `status?`, `track?`, `min_score?` | `jobs`, cada vaga com `follow_up` calculado e, a partir da `v0.2.0`, `company_id`, `priority`, `stages` e `people` |
+| `list_jobs` | leitura | `status?`, `track?`, `min_score?` | `jobs`, cada vaga com `follow_up` calculado e, a partir da `v0.2.0`, `company_id`, `priority`, `stages`, `people`, `resume_track`, `salary_ask` e `contract_type` |
 | `add_job` | escrita | `company`, `title`, `url`, `track?`, `score?`, `next_step?`, `source?` (padrão `user`) | a vaga criada, em `suggested` (empresa nova é criada junto); link repetido: `duplicate_url` com a vaga existente |
-| `update_job` | escrita | `job_id`, `source`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?` | `job` e `history` (uma linha por campo alterado) |
+| `update_job` | escrita | `job_id`, `source`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `resume_track?`, `salary_ask?`, `contract_type?` | `job` e `history` (uma linha por campo alterado) |
 
 ### Pessoas e empresas
 
@@ -91,6 +91,7 @@ Regras principais:
 - **Etapas:** `kind` é `screening`, `test`, `culture_fit`, `hr`, `technical`, `manager` ou `offer`; `result` é `pending`, `passed`, `failed` ou `cancelled`. **Papéis** de `jobs_link_person`: `referrer`, `recruiter`, `hiring_manager`, `contact`.
 - **Prioridade da vaga** (calculada, não gravada): `high` com nota de pelo menos 7,5 ou indicação (`referrer`) confirmada; `medium` com nota de pelo menos 7; `low` nos demais casos. **Prioridade da empresa:** `A`, `B`, `C` ou nula, escolhida pela pessoa; `suggested_priority` é `A` quando a empresa tem pessoa ativa ou candidatura ativa.
 - **Trilha e nota no cadastro:** em `add_job`, `track` deve ser um de `data`, `systems`, `product`, `ai`, `other`, e `score` um número de 0 a 10.
+- **O que foi enviado com a candidatura** (`update_job`): `resume_track` é a trilha do currículo enviado, uma das trilhas acima; `salary_ask` (pretensão) e `contract_type` (regime, como CLT ou PJ) são texto livre curto.
 - **Taxa de entrevista:** candidaturas com data de candidatura que chegaram a um status de entrevista, `offer` ou `hired`, ou a uma etapa `hr`, `technical`, `manager` ou `offer` não cancelada, divididas pelas candidaturas com data de candidatura.
 - **Erros de negócio** voltam como um objeto com `error` (código) e `detail` (mensagem), para o agente explicar o que houve. Os códigos são `duplicate_url`, `duplicate_company`, `duplicate_stage`, `duplicate_link`, `invalid_status`, `invalid_date` (data inválida ou futura), `invalid_input` (campo obrigatório ou origem vazios, valor fora da lista ou da faixa), `not_found`, `stale_proposal` e `expired_proposal`.
 
@@ -390,7 +391,7 @@ As ferramentas não acessam a rede, não executam comandos e só leem e gravam n
 - **Aprovação humana depende do cliente.** O servidor garante que nada é gravado sem uma segunda chamada (`changes_confirm`) e que a proposta é revalidada nela, mas não distingue um agente que confirma sem perguntar à pessoa. A pergunta entre a proposta e a confirmação depende do agente e do cliente.
 - **"Hoje" e as datas gravadas.** O "hoje" das ferramentas (padrão das datas, limite para data futura e data das linhas de histórico) é a data local da máquina; `created_at` e `expires_at` são gravados em UTC. Perto da meia-noite, eles podem cair em dias diferentes. O histórico registra quando a mudança foi feita, não a data de referência pedida ao agente.
 - **Campos não podem ser limpos.** As ferramentas de escrita só alteram os campos informados; não há como voltar um campo opcional a nulo.
-- **Currículo, pretensão e regime enviados** (`resume_track`, `salary_ask`, `contract_type`) só entram pela importação; `update_job` não os recebe.
+- **`resume_track` na importação** é texto livre, enquanto `update_job` aceita só as trilhas; um valor importado fora delas fica gravado, mas não pode ser informado de novo por `update_job`.
 - **`track` e `score` são validados só no cadastro** (`add_job` e importação). Os filtros de `list_jobs` aceitam qualquer valor.
 - **Sistemas testados:** Windows 11, à mão e pela suíte; Ubuntu, pela suíte no CI. macOS não foi testado.
 - **O caminho padrão do banco** (`data/local/job_search.db`) é calculado a partir do diretório do código e pressupõe instalação em modo editável a partir do clone, como descrito acima. Com outra forma de instalação, defina `JOB_SEARCH_DB`.
@@ -412,7 +413,7 @@ python -m pytest
 python -m ruff check .
 ```
 
-Os testes (346 na `v0.2.0`) usam bancos em diretórios temporários e não acessam a rede. Dois deles sobem o servidor como subprocesso e conversam com ele por stdio: um por `python -m job_search_mcp.server` e outro pelo executável instalado `job-search-mcp`.
+Os testes (354 na `v0.2.0`) usam bancos em diretórios temporários e não acessam a rede. Dois deles sobem o servidor como subprocesso e conversam com ele por stdio: um por `python -m job_search_mcp.server` e outro pelo executável instalado `job-search-mcp`.
 
 ## Como o projeto é desenvolvido
 

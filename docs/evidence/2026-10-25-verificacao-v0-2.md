@@ -8,7 +8,7 @@ Registro da execução dos seis casos de uso da [especificação da fonte única
 
 ## Método
 
-- **Versão:** `develop` @ `d0af3e5` (tarefas 09 a 15 integradas). A tarefa 16 não altera código.
+- **Versão:** `develop` @ `d0af3e5` (tarefas 09 a 15 integradas). Os parâmetros novos de `update_job`, acrescentados depois na tarefa 16, foram verificados à parte (seção "Parâmetros novos de update_job").
 - **Ambiente:** Windows 11, Python 3.12.7. Ambiente virtual novo, criado só para esta verificação, com `pip install -e .` (sem as dependências de desenvolvimento): `fastmcp` 4.1.0 e `mcp` 2.3.0.
 - **Servidor:** o executável `job-search-mcp.exe` desse ambiente, iniciado como subprocesso pelo cliente.
 - **Cliente:** `Client(StdioTransport(command=<job-search-mcp.exe>, args=[], env={..., "JOB_SEARCH_DB": <banco>}, keep_alive=False))`, do pacote fastmcp, em um script descartável, não versionado. Chamadas com `call_tool(nome, argumentos, raise_on_error=False)`. Para conferir que nada foi gravado, o script tirou um retrato de todas as tabelas, exceto `proposal`, antes e depois das chamadas.
@@ -182,10 +182,20 @@ Company '  banco ÁURORA ' stored as 'Banco Aurora'.
 
 ## Divergências e observações
 
-1. **Parâmetros de `update_job`.** A tabela de compatibilidade do plano diz que `update_job` ganha `resume_track`, `salary_ask` e `contract_type`; o servidor não os expõe (a lista de parâmetros acima é a da `v0.1.0` mais nada). Esses campos hoje só entram pela importação. O README descreve o código; o ajuste do plano ou do servidor fica como pendência.
+1. **Parâmetros de `update_job`.** Em `d0af3e5`, o servidor não expunha `resume_track`, `salary_ask` e `contract_type`, previstos no plano. Decisão do Supervisor: o servidor segue o plano. Os parâmetros foram acrescentados e verificados na seção seguinte; a listagem da seção "Conexão" é a de `d0af3e5`.
 2. **Datas do histórico.** As linhas de histórico e o `expires_at` usam a data real (2026-10-25), não a data declarada nos pedidos; é o comportamento documentado (o histórico registra quando a mudança foi feita).
 3. **Confirmação feita pelo script.** Nada aqui mostra um agente pedindo aprovação: o servidor garante as duas chamadas e a revalidação, não a pergunta à pessoa.
 4. Todos os nomes de pessoas e empresas são os sintéticos de `data/seed/` e `tests/fixtures/` ou foram inventados para esta verificação.
+
+## Parâmetros novos de update_job
+
+Reexecução sobre o commit `6503e0a` (branch `docs/16-readme-evidencia-e-versao`: `update_job` com os três parâmetros e versão 0.2.0), no mesmo ambiente virtual reinstalado com `pip install -e .` (`__version__` e metadados do pacote: 0.2.0), banco novo com `--seed` e o mesmo cliente por stdio.
+
+- `update_job`: `params=['job_id', 'source', 'status', 'next_step', 'applied_on', 'last_contact_on', 'resume_track', 'salary_ask', 'contract_type']`, `required=['job_id', 'source']`. As demais 16 ferramentas não mudaram.
+- `update_job(job_id=2, source="conversation", resume_track="data", salary_ask="a combinar", contract_type="CLT")` → proposta com três mudanças em `application` 2 (nulo → "data", "a combinar", "CLT"); banco igual.
+- `changes_confirm` → vaga 2 (Loja Horizonte, `applied`) com os três valores; `history` com três linhas, `source` "conversation", data 2026-10-25.
+- `update_job(job_id=2, source="user", resume_track="dados")` → `{"error": "invalid_input", "detail": "Invalid resume_track 'dados'. Valid values: data, systems, product, ai, other.", "valid_values": [...]}`, sem proposta; banco igual.
+- `list_jobs(status="applied")` → vagas 1 (os três nulos) e 2 (os três preenchidos), com `resume_track`, `salary_ask` e `contract_type` como as três últimas chaves.
 
 ## Depois da execução
 
