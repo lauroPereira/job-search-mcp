@@ -299,9 +299,9 @@ especificação → plano → tarefas → implementação → validação
 ## Roteiro
 
 1. **MVP (`v0.1.0`):** as sete ferramentas acima, com testes, dados sintéticos e verificação em conversa real no Claude Code.
-2. **Agente em LangGraph:** um agente que usa o servidor por MCP para montar o briefing diário, redigir follow-ups e pedir aprovação humana antes de registrar. Ver a [decisão 0002](docs/architecture/decisions/0002-agente-langgraph-como-cliente.md).
-3. **Importação:** carregar um controle existente a partir de CSV.
-4. **Painel:** uma tela de leitura em Streamlit sobre o mesmo banco.
+2. **Domínios Currículo, Network e Vagas (`v0.2.0`):** currículo estruturado, empresas e aderência calculada de cada vaga ao currículo, sem modelo de linguagem ([especificação](docs/specs/dominios-v0-2.md)).
+3. **Agente em repositório separado:** o `job-search-agent` usa este servidor por MCP, com chat, dashboards, RAG, avaliação e aprovação humana antes de gravar ([decisão 0004](docs/architecture/decisions/0004-agente-em-repositorio-separado.md)).
+4. **Importação:** carregar um controle existente a partir de CSV.
 
 ## Licença
 
