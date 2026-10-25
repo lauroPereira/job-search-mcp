@@ -2,8 +2,8 @@
 
 No business rule lives here. Every tool reads the local settings, opens the configured
 database, creates the schema when the database is new, calls the domain function and closes
-the connection. Results and
-business errors are plain objects, so the client receives them as structured content.
+the connection. Results and business errors are plain objects, so the client receives them
+as structured content.
 """
 
 import argparse

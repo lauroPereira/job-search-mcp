@@ -35,10 +35,20 @@ class Settings:
 DEFAULT_SETTINGS = Settings()
 
 
-def _positive_int(value) -> int:
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError("use an integer of 1 or more")
-    return value
+def _int_up_to(maximum: int):
+    """Converter for an integer from 1 to `maximum` (the cap keeps date arithmetic in range)."""
+
+    def convert(value) -> int:
+        if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= maximum:
+            raise ValueError(f"use an integer from 1 to {maximum}")
+        return value
+
+    return convert
+
+
+MAX_DAYS = 365
+MAX_TTL_HOURS = 720
+MAX_APPLICATIONS_PER_WEEK = 1000
 
 
 def _rate(value) -> float:
@@ -57,16 +67,19 @@ def _deadline(value) -> date:
 # Section -> key in the file -> (field of Settings, converter that validates the value).
 SCHEMA = {
     "follow_up": {
-        "job_days": ("job_follow_up_days", _positive_int),
-        "contact_days": ("contact_follow_up_days", _positive_int),
+        "job_days": ("job_follow_up_days", _int_up_to(MAX_DAYS)),
+        "contact_days": ("contact_follow_up_days", _int_up_to(MAX_DAYS)),
     },
     "goals": {
         "deadline": ("deadline", _deadline),
-        "applications_per_week": ("applications_per_week", _positive_int),
+        "applications_per_week": (
+            "applications_per_week",
+            _int_up_to(MAX_APPLICATIONS_PER_WEEK),
+        ),
         "interview_rate": ("interview_rate", _rate),
     },
     "proposals": {
-        "ttl_hours": ("proposal_ttl_hours", _positive_int),
+        "ttl_hours": ("proposal_ttl_hours", _int_up_to(MAX_TTL_HOURS)),
     },
 }
 
@@ -91,6 +104,10 @@ def load_settings(path: str | Path | None = None) -> Settings:
             data = tomllib.load(file)
     except tomllib.TOMLDecodeError as failure:
         raise ConfigError(f"Invalid settings file {path}: {failure}.") from None
+    except UnicodeDecodeError:
+        raise ConfigError(
+            f"Invalid settings file {path}: it is not UTF-8 text. Save it with UTF-8 encoding."
+        ) from None
     except OSError as failure:
         raise ConfigError(f"Could not read the settings file {path}: {failure}.") from None
 

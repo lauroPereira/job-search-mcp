@@ -70,6 +70,9 @@ def test_partial_file_keeps_the_other_defaults_and_accepts_an_iso_text_deadline(
         ("[goals]\ndeadline = true\n", "'goals.deadline'"),
         ("[goals]\ninterview_rate = 1.5\n", "'goals.interview_rate'"),
         ("[proposals]\nttl_hours = 1.5\n", "'proposals.ttl_hours'"),
+        ("[follow_up]\njob_days = 99999999\n", "'follow_up.job_days'"),
+        ("[follow_up]\ncontact_days = 366\n", "'follow_up.contact_days'"),
+        ("[proposals]\nttl_hours = 721\n", "'proposals.ttl_hours'"),
         ("[follow_up]\njob_day = 10\n", "Unknown key 'follow_up.job_day'"),
         ("[salary]\nfloor = 1\n", "Unknown section [salary]"),
         ("follow_up = 10\n", "must be a section"),
@@ -81,6 +84,28 @@ def test_an_invalid_file_raises_a_clear_error(tmp_path, text, message):
         load_settings(path)
     assert message in str(failure.value)
     assert str(path) in str(failure.value)
+
+
+def test_the_upper_limits_are_accepted(tmp_path):
+    path = write(tmp_path, "[follow_up]\njob_days = 365\n[proposals]\nttl_hours = 720\n")
+    settings = load_settings(path)
+    assert settings.job_follow_up_days == 365
+    assert settings.proposal_ttl_hours == 720
+
+
+def test_a_file_not_in_utf8_raises_a_clear_error(tmp_path, monkeypatch, capsys):
+    path = tmp_path / "config.toml"
+    path.write_bytes("# Configuração\n[follow_up]\njob_days = 10\n".encode("cp1252"))
+    with pytest.raises(ConfigError) as failure:
+        load_settings(path)
+    assert "UTF-8" in str(failure.value)
+    assert str(path) in str(failure.value)
+    monkeypatch.setenv(config.CONFIG_ENV_VAR, str(path))
+    monkeypatch.setenv(db.DB_ENV_VAR, str(tmp_path / "demo.db"))
+    assert server.main(["--seed"]) == 1
+    captured = capsys.readouterr()
+    assert "UTF-8" in captured.err
+    assert "Traceback" not in captured.err
 
 
 def test_domain_follow_up_receives_the_days():
