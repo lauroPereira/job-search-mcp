@@ -299,9 +299,10 @@ especificação → plano → tarefas → implementação → validação
 ## Roteiro
 
 1. **MVP (`v0.1.0`):** as sete ferramentas acima, com testes, dados sintéticos e verificação em conversa real no Claude Code.
-2. **Domínios Currículo, Network e Vagas (`v0.2.0`):** currículo estruturado, empresas e aderência calculada de cada vaga ao currículo, sem modelo de linguagem ([especificação](docs/specs/dominios-v0-2.md)).
-3. **Agente em repositório separado:** o `job-search-agent` usa este servidor por MCP, com chat, dashboards, RAG, avaliação e aprovação humana antes de gravar ([decisão 0004](docs/architecture/decisions/0004-agente-em-repositorio-separado.md)).
-4. **Importação:** carregar um controle existente a partir de CSV.
+2. **Fonte única (`v0.2.0`):** empresas, candidaturas com etapas e vínculos com pessoas, gravação em duas etapas (proposta e confirmação), histórico único com origem, importação das planilhas e métricas do funil ([especificação](docs/specs/fonte-unica-v0-2.md), [modelo de domínios](docs/specs/modelo-de-dominios.md)).
+3. **Perfil e aderência (`v0.3.0`):** currículo como dado, competências com evidência e aderência calculada de cada vaga ([rascunho](docs/specs/perfil-e-aderencia-v0-3.md)).
+4. **Desenvolvimento (`v0.4.0`):** estudos, cursos e certificações ligados às lacunas das vagas.
+5. **Agente em repositório separado:** o `job-search-agent` usa este servidor por MCP, com chat, dashboards, RAG, avaliação e aprovação humana antes de gravar ([decisão 0004](docs/architecture/decisions/0004-agente-em-repositorio-separado.md)).
 
 ## Licença
 

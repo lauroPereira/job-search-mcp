@@ -1,12 +1,12 @@
-# Especificação: domínios Currículo, Network e Vagas (v0.2)
+# Especificação: Perfil e aderência (v0.3)
 
-Status: **rascunho, a reescrever**. O [modelo de domínios](modelo-de-dominios.md) propõe que a `v0.2.0` seja a fatia "fonte única" e que o conteúdo abaixo (perfil e aderência) passe para a `v0.3.0` (questão D2). Esta especificação será reescrita depois das decisões do discovery. Evolui o [servidor MCP](servidor-mcp-busca-de-emprego.md) da `v0.1.0`. O cliente com agentes, chat, RAG e avaliação fica no repositório separado `job-search-agent` ([decisão 0004](../architecture/decisions/0004-agente-em-repositorio-separado.md)).
+Status: **rascunho**, para a `v0.3.0` (decisão D2 do [modelo de domínios](modelo-de-dominios.md)). Será revisto depois da `v0.2.0`, à luz do modelo completo e da [decisão 0009](../architecture/decisions/0009-perfil-como-fonte-dos-textos.md). O cliente com agentes fica no `job-search-agent` ([decisão 0004](../architecture/decisions/0004-agente-em-repositorio-separado.md)).
 
 ## Problema
 
 - **O currículo não é dado.** Não dá para perguntar "onde eu comprovo esta habilidade?" nem comparar o que uma vaga pede com o que eu tenho.
 - **A nota de aderência é dada à mão**, sem explicação do que bate e do que falta.
-- **Empresa é só texto** repetido em vagas e contatos: não dá para ver quem eu conheço na empresa de uma vaga nem priorizar empresas-alvo.
+- **Empresa** passa a ser entidade na `v0.2.0`; a aderência usa esse vínculo para mostrar quem eu conheço na empresa de uma vaga.
 
 ## Usuário afetado
 

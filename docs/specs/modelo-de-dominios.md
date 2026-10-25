@@ -194,4 +194,17 @@ Cada fatia é um case curto por si só.
 
 ## Decisões do discovery
 
-Pendentes. Cada questão respondida pelo responsável humano é registrada aqui, com data, antes de reescrever a especificação da fatia escolhida.
+Registradas em 2026-10-25: o responsável humano aceitou as propostas iniciais de D1 a D8.
+
+| # | Decisão |
+|---|---|
+| D1 | Os domínios Perfil, Network, Vagas (com Remuneração), Desenvolvimento, Conteúdo e Núcleo formam o modelo. |
+| D2 | Ordem das fatias: `v0.2.0` fonte única, `v0.3.0` perfil e aderência, `v0.4.0` desenvolvimento, conteúdo depois. Especificação da `v0.2.0` em [`fonte-unica-v0-2.md`](fonte-unica-v0-2.md). |
+| D3 | Candidatura separada da vaga, com etapas datadas. |
+| D4 | Status `on_hold` para vagas e pessoas. |
+| D5 | Gravação em duas etapas no servidor ([decisão 0006](../architecture/decisions/0006-gravacao-em-duas-etapas.md)). |
+| D6 | Prioridade de vaga derivada de nota e indicação; prioridade de empresa A, B, C com regra. |
+| D7 | Os três currículos atuais são a base do Perfil; o conteúdo real fica só no banco local. |
+| D8 | Skills de uso pelo Claude Code ficam neste repositório; o `job-search-agent` reimplementa os fluxos no grafo. |
+
+Decisões de arquitetura registradas: A1 em [0005](../architecture/decisions/0005-banco-como-fonte-unica.md), A2 em [0006](../architecture/decisions/0006-gravacao-em-duas-etapas.md), A3 em [0007](../architecture/decisions/0007-historico-unico-com-origem.md), A4 em [0008](../architecture/decisions/0008-parametros-em-configuracao-local.md), A5 em [0009](../architecture/decisions/0009-perfil-como-fonte-dos-textos.md). A6 (ações externas ficam com a pessoa) é registrada no `job-search-agent`.
