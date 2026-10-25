@@ -13,8 +13,21 @@ from job_search_mcp import domain
 # The only tables and columns record_changes may write: both go into the UPDATE text.
 UPDATABLE_FIELDS = {
     "application": ("status", "next_step", "applied_on", "last_contact_on"),
-    "contact": ("status", "next_step", "last_contact_on"),
+    "contact": (
+        "status",
+        "next_step",
+        "last_contact_on",
+        "name",
+        "company",
+        "role_title",
+        "relationship",
+        "channel",
+    ),
+    "company": ("name", "sector", "priority", "job_platform", "notes"),
 }
+# Fields shown and recorded by name whose stored column is a reference to another record:
+# (entity, field) -> column. The id to store comes in the `references` of record_changes.
+REFERENCE_FIELDS = {("contact", "company"): "company_id"}
 # The tables whose `version` may be read: they go into the SELECT text.
 VERSIONED_TABLES = ("company", "job", "application", "contact")
 
@@ -119,23 +132,37 @@ def record_changes(
     changed_on: date,
     source_type: str,
     source_ref: str | None = None,
+    references: dict | None = None,
 ) -> list[dict]:
     """Write the fields that really change and one history line for each of them.
 
     `current` holds the stored values of the record and `changes` the new ones. When at
     least one field changes, the record is updated once and its `version` goes up by one.
-    Does not commit: the caller owns the transaction. Returns the history lines created.
-    An unknown entity or field, or an unknown source type, raises ValueError before
-    anything is written.
+    A reference field (REFERENCE_FIELDS, such as the company of a contact) is compared and
+    recorded by name, and its column gets the id given in `references`. Does not commit:
+    the caller owns the transaction. Returns the history lines created. An unknown entity
+    or field, an unknown source type or a changed reference field without its id raises
+    ValueError before anything is written.
     """
     lines = diff(entity, record_id, current, changes)
     _check_source(source_type)
+    references = references or {}
+    assignments, values = [], []
+    for line in lines:
+        column = REFERENCE_FIELDS.get((entity, line["field"]))
+        if column is None:
+            assignments.append(f"{line['field']} = ?")
+            values.append(line["new_value"])
+        elif line["field"] in references:
+            assignments.append(f"{column} = ?")
+            values.append(references[line["field"]])
+        else:
+            raise ValueError(f"Missing the id of the reference field: {line['field']}.")
     if not lines:
         return []
-    assignments = ", ".join(f"{line['field']} = ?" for line in lines)
     connection.execute(
-        f"UPDATE {entity} SET {assignments}, version = version + 1 WHERE id = ?",
-        (*(line["new_value"] for line in lines), record_id),
+        f"UPDATE {entity} SET {', '.join(assignments)}, version = version + 1 WHERE id = ?",
+        (*values, record_id),
     )
     return _insert_lines(connection, lines, record_id, changed_on, source_type, source_ref)
 

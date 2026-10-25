@@ -18,7 +18,7 @@ from typing import Annotated, Any
 from fastmcp import FastMCP
 from pydantic import Field
 
-from job_search_mcp import config, contacts, db, domain, jobs, proposals
+from job_search_mcp import companies, config, contacts, db, domain, jobs, proposals
 from job_search_mcp import summary as summary_queries
 
 mcp = FastMCP(
@@ -27,16 +27,18 @@ mcp = FastMCP(
         "Tools to manage a job search: jobs, networking contacts, follow-ups and a daily "
         "summary. Every tool returns an object; a business error is an object with the keys "
         "'error' (a stable code) and 'detail' (a message to relay to the user). Writes take "
-        "two steps: add_job, update_job and log_interaction change nothing and return a "
-        "proposal with the changes (each field with its current and proposed value). Show "
-        "the changes to the user and call changes_confirm with the proposal id only after "
-        "the user approves; otherwise call changes_discard. Proposals expire, and one whose "
-        "records changed in the meantime is refused as stale: propose again."
+        "two steps: add_job, update_job, log_interaction, network_save_company and "
+        "network_save_person change nothing and return a proposal with the changes (each "
+        "field with its current and proposed value). Show the changes to the user and call "
+        "changes_confirm with the proposal id only after the user approves; otherwise call "
+        "changes_discard. Proposals expire, and one whose records changed in the meantime is "
+        "refused as stale: propose again."
     ),
 )
 
 JOB_STATUS_HELP = f"One of: {', '.join(domain.JOB_STATUSES)}."
 CONTACT_STATUS_HELP = f"One of: {', '.join(domain.CONTACT_STATUSES)}."
+PRIORITY_HELP = f"One of: {', '.join(domain.COMPANY_PRIORITIES)}."
 ISO_DATE_HELP = "ISO 8601 date (YYYY-MM-DD)."
 READ_ONLY = {"readOnlyHint": True}
 SOURCE_HELP = (
@@ -274,6 +276,148 @@ def log_interaction(
     )
 
 
+@mcp.tool(annotations=READ_ONLY)
+def network_list_companies(
+    priority: Annotated[
+        str | None,
+        Field(description=f"Keep only companies with this priority. {PRIORITY_HELP}"),
+    ] = None,
+) -> dict[str, Any]:
+    """List the companies, ordered by id, optionally only those with a given priority.
+
+    Returns {"companies": [...]}. Each company has id, name, sector, priority (the one the
+    user chose, or null), job_platform, notes and suggested_priority: 'A' when the company
+    has an active person (status other than closed) or an active application (status not
+    hired, rejected, withdrawn or closed), otherwise null.
+    """
+    with open_database() as connection:
+        result = companies.list_companies(connection, priority=priority)
+    return result if domain.is_error(result) else {"companies": result}
+
+
+@mcp.tool(annotations=READ_ONLY)
+def network_company_overview(
+    company_id: Annotated[
+        int, Field(description="Id of the company (see network_list_companies).")
+    ],
+) -> dict[str, Any]:
+    """Who the user knows at a company and what is open there.
+
+    Returns {"company": as in network_list_companies, "people": every person of the company
+    as in list_contacts, "applications": its active applications, each with its job, as in
+    list_jobs}.
+    """
+    with open_database() as connection:
+        return companies.company_overview(connection, company_id, config.load_settings())
+
+
+@mcp.tool
+def network_save_company(
+    name: Annotated[
+        str,
+        Field(description="Name of the company; unique, ignoring case, accents and spaces."),
+    ],
+    source: Annotated[str, Field(description=SOURCE_HELP)],
+    company_id: Annotated[
+        int | None,
+        Field(description="Id of the company to change; leave it out to create a company."),
+    ] = None,
+    sector: Annotated[str | None, Field(description="Business sector.")] = None,
+    priority: Annotated[
+        str | None, Field(description=f"Priority the user gives it. {PRIORITY_HELP}")
+    ] = None,
+    job_platform: Annotated[
+        str | None, Field(description="Platform where the company posts its jobs.")
+    ] = None,
+    notes: Annotated[str | None, Field(description="Free notes about the company.")] = None,
+) -> dict[str, Any]:
+    """Propose creating a company, or changing the informed fields of one.
+
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. Fields left out are not touched. Once confirmed, changes_confirm
+    returns {"company": the saved company}. A name already used by another company is the
+    error 'duplicate_company', with that company in the key 'company'.
+    """
+    return propose(
+        "network_save_company",
+        {
+            "company_id": company_id,
+            "name": name,
+            "sector": sector,
+            "priority": priority,
+            "job_platform": job_platform,
+            "notes": notes,
+            "source": source,
+            "reference_date": today().isoformat(),
+        },
+    )
+
+
+@mcp.tool
+def network_save_person(
+    name: Annotated[str, Field(description="Name of the person.")],
+    source: Annotated[str, Field(description=SOURCE_HELP)],
+    contact_id: Annotated[
+        int | None,
+        Field(
+            description="Id of the person to change (see list_contacts); leave it out to "
+            "create a person."
+        ),
+    ] = None,
+    company: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Name of the person's company, found ignoring case, accents and spaces; "
+                "a company not registered yet is created too."
+            )
+        ),
+    ] = None,
+    role_title: Annotated[str | None, Field(description="Job title of the person.")] = None,
+    relationship: Annotated[str | None, Field(description="How the user knows the person.")] = None,
+    channel: Annotated[
+        str | None, Field(description="Where to talk to the person, such as linkedin or email.")
+    ] = None,
+    status: Annotated[
+        str | None,
+        Field(
+            description=(
+                f"Status of the person. {CONTACT_STATUS_HELP} A new person defaults to "
+                "to_contact; on_hold stops the follow-ups until changed."
+            )
+        ),
+    ] = None,
+    next_step: Annotated[str | None, Field(description="Next action with this person.")] = None,
+) -> dict[str, Any]:
+    """Propose creating a person, or changing the informed fields of one.
+
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. Fields left out are not touched. Once confirmed, changes_confirm
+    returns {"contact": the saved contact}, as in list_contacts.
+    """
+    return propose(
+        "network_save_person",
+        {
+            "contact_id": contact_id,
+            "name": name,
+            "company": company,
+            "role_title": role_title,
+            "relationship": relationship,
+            "channel": channel,
+            "status": status,
+            "next_step": next_step,
+            "source": source,
+            "reference_date": today().isoformat(),
+        },
+    )
+
+
 @mcp.tool
 def changes_confirm(
     proposal_id: Annotated[
@@ -283,7 +427,8 @@ def changes_confirm(
     """Apply a proposal the user approved, exactly as it was shown.
 
     Returns what the proposing tool returns once applied (add_job: the created job;
-    update_job: {"job", "history"}; log_interaction: {"contact", "follow_up", "job"}).
+    update_job: {"job", "history"}; log_interaction: {"contact", "follow_up", "job"};
+    network_save_company: {"company"}; network_save_person: {"contact"}).
     Errors: 'stale_proposal' when the records changed since the proposal (nothing is
     written: propose again), 'expired_proposal' when it is past its expiry, and
     'not_found' for an unknown id or a proposal already applied or discarded.

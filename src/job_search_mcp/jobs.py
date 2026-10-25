@@ -72,7 +72,7 @@ def list_jobs(
     return [job_to_dict(row, settings) for row in rows]
 
 
-def _changed_on(field: str, value: str | date) -> date | dict:
+def parse_reference_date(field: str, value: str | date) -> date | dict:
     """The date written in the history, or a structured error when it is not a valid date."""
     try:
         parsed = to_date(value)
@@ -121,7 +121,7 @@ def plan_add_job(
     origin = parse_source(source)
     if domain.is_error(origin):
         return origin
-    changed_on = _changed_on("reference_date", reference_date)
+    changed_on = parse_reference_date("reference_date", reference_date)
     if domain.is_error(changed_on):
         return changed_on
     url = url.strip()
@@ -245,7 +245,7 @@ def plan_update_job(
     origin = parse_source(source)
     if domain.is_error(origin):
         return origin
-    changed_on = _changed_on("reference_date", reference_date)
+    changed_on = parse_reference_date("reference_date", reference_date)
     if domain.is_error(changed_on):
         return changed_on
     job = get_job(connection, job_id, settings)

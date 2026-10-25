@@ -23,6 +23,10 @@ TOOL_NAMES = [
     "list_contacts",
     "list_jobs",
     "log_interaction",
+    "network_company_overview",
+    "network_list_companies",
+    "network_save_company",
+    "network_save_person",
     "pending_followups",
     "update_job",
 ]
@@ -51,12 +55,12 @@ def run(action, transport=None):
     return asyncio.run(session())
 
 
-def call(name, **arguments):
+def call(name, /, **arguments):
     """Call a tool through the in-memory client and return the raw result."""
     return run(lambda client: client.call_tool(name, arguments, raise_on_error=False))
 
 
-def structured(name, **arguments):
+def structured(name, /, **arguments):
     """Call a tool and return its structured content, checking it is not a protocol error."""
     result = call(name, **arguments)
     assert result.is_error is False
@@ -64,7 +68,7 @@ def structured(name, **arguments):
     return result.structured_content
 
 
-def confirmed(name, **arguments):
+def confirmed(name, /, **arguments):
     """Call a write tool and confirm its proposal; a structured error is returned as it is."""
     result = structured(name, **arguments)
     if "error" in result:
@@ -100,7 +104,7 @@ def rows(path, query):
         connection.close()
 
 
-def test_server_lists_exactly_the_ten_tools(db_path):
+def test_server_lists_exactly_the_fourteen_tools(db_path):
     tools = run(lambda client: client.list_tools())
     assert sorted(tool.name for tool in tools) == TOOL_NAMES
     assert server.mcp.name == "job-search"
@@ -125,6 +129,28 @@ def test_tool_parameters_match_the_plan(db_path):
         "changes_confirm": ["proposal_id"],
         "changes_discard": ["proposal_id"],
         "changes_list_pending": [],
+        "network_list_companies": ["priority"],
+        "network_company_overview": ["company_id"],
+        "network_save_company": [
+            "company_id",
+            "job_platform",
+            "name",
+            "notes",
+            "priority",
+            "sector",
+            "source",
+        ],
+        "network_save_person": [
+            "channel",
+            "company",
+            "contact_id",
+            "name",
+            "next_step",
+            "relationship",
+            "role_title",
+            "source",
+            "status",
+        ],
     }
     required = {name: sorted(tool.input_schema.get("required", [])) for name, tool in tools.items()}
     assert required == {
@@ -138,6 +164,10 @@ def test_tool_parameters_match_the_plan(db_path):
         "changes_confirm": ["proposal_id"],
         "changes_discard": ["proposal_id"],
         "changes_list_pending": [],
+        "network_list_companies": [],
+        "network_company_overview": ["company_id"],
+        "network_save_company": ["name", "source"],
+        "network_save_person": ["name", "source"],
     }
     days_ahead = tools["pending_followups"].input_schema["properties"]["days_ahead"]
     assert days_ahead["type"] == "integer"
@@ -160,6 +190,10 @@ def test_only_the_query_tools_carry_the_read_only_hint(db_path):
         "changes_list_pending": True,
         "changes_confirm": None,
         "changes_discard": None,
+        "network_list_companies": True,
+        "network_company_overview": True,
+        "network_save_company": None,
+        "network_save_person": None,
     }
 
 
@@ -345,6 +379,15 @@ WRITES = (
     ),
     ("update_job", {"job_id": 8, "source": "email", "status": "applied"}),
     ("log_interaction", {"contact_id": 1, "summary": "Respondeu sobre a indicação"}),
+    ("network_save_company", {"name": "Empresa Nova", "source": "user", "priority": "C"}),
+    (
+        "network_save_person",
+        {"name": "Iara Nova", "company": "Empresa Zeta", "source": "conversation"},
+    ),
+    (
+        "network_save_person",
+        {"contact_id": 7, "name": "Gabriela Ensaio", "source": "user", "status": "on_hold"},
+    ),
 )
 
 
@@ -375,6 +418,78 @@ def test_write_tools_only_propose_and_changes_confirm_applies(db_path, name, arg
     again = structured("changes_confirm", proposal_id=proposal["id"])
     assert again["error"] == "not_found"
     assert again["status"] == "applied"
+
+
+def test_use_case_4_who_the_user_knows_at_a_company(db_path):
+    listed = structured("network_list_companies")["companies"]
+    aurora = next(company for company in listed if company["name"] == "Banco Aurora")
+    assert aurora["suggested_priority"] == "A"
+    overview = structured("network_company_overview", company_id=aurora["id"])
+    assert overview["company"] == aurora
+    assert [person["name"] for person in overview["people"]] == ["Ana Exemplo"]
+    assert [job["title"] for job in overview["applications"]] == ["Data Engineer"]
+    assert structured("network_company_overview", company_id=99)["error"] == "not_found"
+    assert structured("network_list_companies", priority="A") == {"companies": []}
+    assert structured("network_list_companies", priority="X")["error"] == "invalid_input"
+
+
+def test_use_case_5_on_hold_takes_the_person_out_of_the_follow_ups(db_path):
+    def contact_ids():
+        return [item["id"] for item in structured("pending_followups")["contacts"]]
+
+    assert 1 in contact_ids()
+    applied = confirmed(
+        "network_save_person",
+        contact_id=1,
+        name="Ana Exemplo",
+        status="on_hold",
+        source="conversation",
+    )
+    assert applied["contact"]["status"] == "on_hold"
+    assert 1 not in contact_ids()
+    assert rows(
+        db_path,
+        "SELECT field, new_value, source_type FROM history"
+        " WHERE entity = 'contact' AND record_id = 1",
+    ) == [("status", "on_hold", "conversation")]
+
+
+def test_network_save_company_refuses_a_duplicate_name_and_writes_history(db_path):
+    before = snapshot(db_path)
+    duplicate = structured("network_save_company", name="banco aurora", source="user")
+    assert duplicate["error"] == "duplicate_company"
+    assert duplicate["company"]["name"] == "Banco Aurora"
+    assert snapshot(db_path) == before
+    saved = confirmed(
+        "network_save_company", company_id=1, name="Banco Aurora", priority="A", source="email"
+    )
+    assert saved["company"]["priority"] == "A"
+    assert rows(
+        db_path,
+        "SELECT field, old_value, new_value, date, source_type FROM history"
+        " WHERE entity = 'company'",
+    ) == [("priority", None, "A", "2026-03-16", "email")]
+    assert (
+        structured("network_save_company", name="Nova", source="user", priority="Z")["error"]
+        == "invalid_input"
+    )
+
+
+def test_network_save_person_with_a_new_company_creates_both(db_path):
+    proposal = structured(
+        "network_save_person", name="Iara Nova", company="Empresa Zeta", source="conversation"
+    )["proposal"]
+    assert [(c["entity"], c["field"]) for c in proposal["changes"]] == [
+        ("company", "name"),
+        ("contact", "name"),
+        ("contact", "company"),
+        ("contact", "status"),
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["contact"]["company"] == "Empresa Zeta"
+    overview = structured("network_company_overview", company_id=applied["contact"]["company_id"])
+    assert [person["name"] for person in overview["people"]] == ["Iara Nova"]
+    assert overview["company"]["suggested_priority"] == "A"
 
 
 def test_changes_discard_drops_the_proposal_without_changing_anything(db_path):

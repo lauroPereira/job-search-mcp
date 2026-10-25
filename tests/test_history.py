@@ -73,7 +73,7 @@ def test_record_changes_without_change_writes_nothing(connection):
     ("entity", "changes", "source_type", "message"),
     [
         ("job", {"title": "x"}, "user", "Entity"),
-        ("contact", {"name": "x"}, "user", "name"),
+        ("contact", {"job_id": 1}, "user", "job_id"),
         ("contact", {"status": "closed"}, "rumor", "source type"),
     ],
 )

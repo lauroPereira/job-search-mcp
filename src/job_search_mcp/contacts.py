@@ -1,4 +1,5 @@
-"""Contact operations: list contacts and log interactions, keeping the linked job in step.
+"""Contact operations: list contacts, log interactions (keeping the linked job in step) and
+plan the creation or change of a person.
 
 A contact is read with its company and keeps the keys of v0.1.0: `company` is the name of
 the company and `job_id` the job of the first application the person is linked to with the
@@ -173,3 +174,119 @@ def plan_log_interaction(
         }
 
     return domain.Plan(changes=changes, base_versions=base_versions, apply=apply)
+
+
+def plan_save_person(
+    connection: sqlite3.Connection,
+    name: str,
+    contact_id: int | None = None,
+    company: str | None = None,
+    role_title: str | None = None,
+    relationship: str | None = None,
+    channel: str | None = None,
+    status: str | None = None,
+    next_step: str | None = None,
+    *,
+    source: str,
+    reference_date: str | datetime.date,
+    settings: Settings | None = None,
+) -> domain.Plan | dict:
+    """Plan the creation of a person (no `contact_id`) or the change of one, writing nothing.
+
+    The name is required. A company is given by name and found by normalized name
+    (db.normalize_name); when no company has it, the plan creates the company too. A new
+    person without a status starts in to_contact. In a change, fields left as None (or
+    blank) are not touched; on_hold takes the person out of the follow-ups. `source` and
+    `reference_date` go to the history, one line per created or changed field (the company
+    of a person is recorded by name). A change depends on the version of the contact;
+    applying the plan returns {"contact": the saved contact}.
+    """
+    name = domain.optional_text(name)
+    if name is None:
+        return domain.error("invalid_input", "Field 'name' is required.")
+    if status is not None and status not in domain.CONTACT_STATUSES:
+        return domain.invalid_status(status, domain.CONTACT_STATUSES)
+    origin = jobs.parse_source(source)
+    if domain.is_error(origin):
+        return origin
+    changed_on = jobs.parse_reference_date("reference_date", reference_date)
+    if domain.is_error(changed_on):
+        return changed_on
+    current = None
+    if contact_id is not None:
+        current = get_contact(connection, contact_id, settings)
+        if current is None:
+            return domain.not_found("contact", contact_id)
+    company_name = domain.optional_text(company)
+    new_company = False
+    if company_name is not None:
+        stored = connection.execute(
+            "SELECT name FROM company WHERE normalized_name = ?", (db.normalize_name(company_name),)
+        ).fetchone()
+        new_company = stored is None
+        company_name = company_name if new_company else stored["name"]
+    if status is None and current is None:
+        status = NOT_CONTACTED_STATUS
+    informed = {
+        "name": name,
+        "company": company_name,
+        "role_title": domain.optional_text(role_title),
+        "relationship": domain.optional_text(relationship),
+        "channel": domain.optional_text(channel),
+        "status": status,
+        "next_step": domain.optional_text(next_step),
+    }
+    values = {field: value for field, value in informed.items() if value is not None}
+    changes = history.creation("company", {"name": company_name}) if new_company else []
+
+    def company_id() -> int | None:
+        found = db.ensure_company(connection, company_name)
+        if new_company:
+            history.record_creation(
+                connection, "company", found, {"name": company_name}, changed_on, *origin
+            )
+        return found
+
+    if current is None:
+
+        def create() -> dict:
+            new_id = connection.execute(
+                "INSERT INTO contact (name, company_id, role_title, relationship, channel,"
+                " status, next_step) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    name,
+                    company_id(),
+                    informed["role_title"],
+                    informed["relationship"],
+                    informed["channel"],
+                    status,
+                    informed["next_step"],
+                ),
+            ).lastrowid
+            history.record_creation(connection, "contact", new_id, values, changed_on, *origin)
+            return {"contact": get_contact(connection, new_id, settings)}
+
+        changes += history.creation("contact", values)
+        return domain.Plan(changes=changes, base_versions={}, apply=create)
+
+    def update() -> dict:
+        history.record_changes(
+            connection,
+            "contact",
+            contact_id,
+            current,
+            values,
+            changed_on,
+            *origin,
+            references={"company": company_id()},
+        )
+        return {"contact": get_contact(connection, contact_id, settings)}
+
+    changes += history.diff("contact", contact_id, current, values)
+    return domain.Plan(
+        changes=changes,
+        base_versions={
+            f"contact:{contact_id}": history.read_version(connection, "contact", contact_id)
+        },
+        apply=update,
+    )

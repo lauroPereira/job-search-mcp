@@ -16,7 +16,7 @@ import secrets
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from job_search_mcp import contacts, domain, jobs
+from job_search_mcp import companies, contacts, domain, jobs
 from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 
 # The write operations that go through a proposal: tool name -> planning function.
@@ -24,6 +24,8 @@ PLANNERS = {
     "add_job": jobs.plan_add_job,
     "update_job": jobs.plan_update_job,
     "log_interaction": contacts.plan_log_interaction,
+    "network_save_company": companies.plan_save_company,
+    "network_save_person": contacts.plan_save_person,
 }
 PENDING = "pending"
 # What arguments and preview hold once a proposal can no longer be applied (the columns are

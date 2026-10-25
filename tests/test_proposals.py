@@ -17,6 +17,19 @@ WRITES = (
     ),
     ("update_job", {"job_id": 8, "source": "email", "reference_date": ON, "status": "applied"}),
     ("log_interaction", {"contact_id": 1, "summary": "Respondeu sobre a indicação", "date": ON}),
+    (
+        "network_save_company",
+        {"name": "Empresa Nova", "priority": "B", "source": "user", "reference_date": ON},
+    ),
+    (
+        "network_save_person",
+        {
+            "name": "Iara Nova",
+            "company": "Empresa Zeta",
+            "source": "conversation",
+            "reference_date": ON,
+        },
+    ),
 )
 
 
@@ -144,6 +157,45 @@ def test_a_proposal_on_a_record_changed_since_then_is_stale(connection):
     assert snapshot(connection) == changed
     assert status(connection, before["id"]) == "stale"
     assert proposals.confirm(connection, before["id"], NOW)["error"] == "stale_proposal"
+
+
+@pytest.mark.parametrize(
+    ("tool", "arguments", "other_arguments"),
+    [
+        (
+            "network_save_company",
+            {"company_id": 1, "name": "Banco Aurora", "priority": "A"},
+            {"company_id": 1, "name": "Banco Aurora", "sector": "Finanças"},
+        ),
+        (
+            "network_save_person",
+            {"contact_id": 7, "name": "Gabriela Ensaio", "status": "on_hold"},
+            {"contact_id": 7, "name": "Gabriela Ensaio", "next_step": "Outro passo"},
+        ),
+    ],
+)
+def test_a_network_proposal_on_a_record_changed_since_then_is_stale(
+    connection, tool, arguments, other_arguments
+):
+    common = {"source": "user", "reference_date": ON}
+    before = propose(connection, tool, {**arguments, **common})
+    other = propose(connection, tool, {**other_arguments, **common})
+    assert "error" not in proposals.confirm(connection, other["id"], NOW)
+    changed = snapshot(connection)
+    assert proposals.confirm(connection, before["id"], NOW)["error"] == "stale_proposal"
+    assert snapshot(connection) == changed
+
+
+def test_a_company_created_by_another_proposal_makes_the_duplicate_stale(connection):
+    company = propose(connection, *WRITES[3])
+    person = propose(connection, "network_save_person", {**WRITES[4][1], "company": "Empresa Nova"})
+    assert person["changes"][0]["entity"] == "company"
+    proposals.confirm(connection, company["id"], NOW)
+    result = proposals.confirm(connection, person["id"], NOW)
+    assert result["error"] == "stale_proposal"
+    assert count(connection, "contact") == 8
+    twin = proposals.create(connection, *WRITES[3], NOW)
+    assert twin["error"] == "duplicate_company"
 
 
 def test_a_proposal_whose_preview_changed_is_stale(connection):
