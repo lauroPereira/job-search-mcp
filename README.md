@@ -2,7 +2,7 @@
 
 Servidor [MCP](https://modelcontextprotocol.io) que dá a um agente de IA as ferramentas para gerir uma busca de emprego: vagas, contatos de networking, follow-ups e um resumo do que fazer hoje.
 
-> **Estado:** MVP implementado. A versão estável fica em `main` e o desenvolvimento em `develop`; enquanto a primeira versão não é promovida para `main`, o código está só na branch `develop` (`git clone --branch develop`, como na [instalação](#instalação)). As sete ferramentas funcionam por stdio, com testes automatizados e dados de demonstração sintéticos. Os cinco casos de uso foram verificados por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)); a verificação manual em uma conversa no Claude Code ou no Claude Desktop ainda está pendente. Ainda não há versão publicada (tag).
+> **Estado:** MVP publicado na versão `v0.1.0`. A versão estável fica em `main` e o desenvolvimento em `develop`. As sete ferramentas funcionam por stdio, com testes automatizados e dados de demonstração sintéticos. Os cinco casos de uso foram verificados por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)) e em uma conversa real no Claude Code, no Windows ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)); o Claude Desktop ainda não foi verificado.
 
 ## Por que este projeto existe
 
@@ -61,12 +61,12 @@ Detalhes em [`docs/specs/servidor-mcp-busca-de-emprego.md`](docs/specs/servidor-
 
 Requisitos: Python 3.12 ou mais novo e Git.
 
-A versão estável fica em `main` e o desenvolvimento em `develop`. Enquanto a primeira versão não é promovida para `main`, um clone sem `--branch` não traz o código; por isso os comandos abaixo clonam a branch `develop`. Depois da promoção, tire o `--branch develop` para ficar na versão estável.
+A versão estável fica em `main` e o desenvolvimento em `develop`. Os comandos abaixo clonam a versão estável; para a de desenvolvimento, acrescente `--branch develop`.
 
 Linux e macOS (nesses sistemas o interpretador costuma se chamar `python3`; depois de ativar o ambiente virtual, `python` e `pip` já são os dele):
 
 ```bash
-git clone --branch develop https://github.com/lauroPereira/job-search-mcp.git
+git clone https://github.com/lauroPereira/job-search-mcp.git
 cd job-search-mcp
 python3 -m venv .venv
 source .venv/bin/activate
@@ -76,7 +76,7 @@ pip install -e .
 Windows (PowerShell):
 
 ```powershell
-git clone --branch develop https://github.com/lauroPereira/job-search-mcp.git
+git clone https://github.com/lauroPereira/job-search-mcp.git
 cd job-search-mcp
 python -m venv .venv
 .venv\Scripts\Activate.ps1
@@ -192,7 +192,7 @@ No Windows, nos arquivos JSON dos dois clientes, o comando é o executável em `
 
 ## Exemplos de conversa
 
-Os exemplos usam o banco de demonstração e a data de referência 2026-03-16. As chamadas e os retornos são os registrados na [evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md), obtidos por um cliente programático. As falas são **ilustrativas**: ainda não foram reproduzidas em uma conversa real, e cada agente redige a resposta do seu jeito.
+Os exemplos usam o banco de demonstração e a data de referência 2026-03-16. As chamadas e os retornos são os registrados na [evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md), obtidos por um cliente programático. As falas são **ilustrativas**: cada agente redige a resposta do seu jeito. Os mesmos pedidos foram feitos em uma conversa real no Claude Code, com as mesmas ferramentas chamadas e os mesmos dados nas respostas ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)).
 
 ### 1. Resumo da manhã
 
@@ -259,7 +259,7 @@ As ferramentas não acessam a rede, não executam comandos e só leem e gravam n
 - **`track` e `score` são validados só no cadastro** (`add_job`). Os filtros de `list_jobs` aceitam qualquer valor, e linhas que já estejam no banco ou que entrem por outro caminho não são conferidas.
 - **Sistemas testados:** Windows 11, à mão e pela suíte; Ubuntu, pela suíte no CI. macOS não foi testado.
 - **O caminho padrão do banco** (`data/local/job_search.db`) é calculado a partir do diretório do código e pressupõe instalação em modo editável a partir do clone, como descrito acima. Com outra forma de instalação, defina `JOB_SEARCH_DB`.
-- A verificação em uma conversa real no Claude Code ou no Claude Desktop ainda está pendente (ver o estado no início).
+- **Clientes verificados:** Claude Code no Windows, em conversa real ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)). Claude Desktop e os comandos de instalação de Linux e macOS não foram verificados à mão.
 
 ## Como rodar os testes
 
@@ -296,7 +296,7 @@ especificação → plano → tarefas → implementação → validação
 
 ## Roteiro
 
-1. **MVP (implementado):** as sete ferramentas acima, com testes e dados sintéticos. Faltam a verificação manual em um cliente de conversa e a promoção para `main`.
+1. **MVP (`v0.1.0`):** as sete ferramentas acima, com testes, dados sintéticos e verificação em conversa real no Claude Code.
 2. **Agente em LangGraph:** um agente que usa o servidor por MCP para montar o briefing diário, redigir follow-ups e pedir aprovação humana antes de registrar. Ver a [decisão 0002](docs/architecture/decisions/0002-agente-langgraph-como-cliente.md).
 3. **Importação:** carregar um controle existente a partir de CSV.
 4. **Painel:** uma tela de leitura em Streamlit sobre o mesmo banco.
