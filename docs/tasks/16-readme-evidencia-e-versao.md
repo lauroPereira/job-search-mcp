@@ -38,17 +38,50 @@ Documentar a `v0.2.0`, registrar a evidência dos seis casos de uso e preparar a
 
 ## Critérios de conclusão
 
-- [ ] Todos os critérios de aceitação de `docs/specs/fonte-unica-v0-2.md` marcados, com evidência.
-- [ ] README coerente com as 17 ferramentas e com a linha de comando.
-- [ ] Notas da versão com a mudança de contrato.
-- [ ] `python tools/scripts/lint_and_tests.py --strict` sem falhas.
+- [ ] Todos os critérios de aceitação de `docs/specs/fonte-unica-v0-2.md` marcados, com evidência. Oito de nove marcados; o dos seis casos de uso aguarda a verificação manual no Claude Code.
+- [x] README coerente com as 17 ferramentas e com a linha de comando.
+- [x] Notas da versão com a mudança de contrato.
+- [x] `python tools/scripts/lint_and_tests.py --strict` sem falhas.
 
 ## Validação
 
-Pendente.
+Data: 2026-10-25. Ambiente: Windows 11, Python 3.12.7. Branch `docs/16-readme-evidencia-e-versao` a partir de `develop` @ `d0af3e5` (tarefas 09 a 15). A primeira entrega foi só documentação; as decisões abaixo acrescentaram código.
+
+- `.venv\Scripts\python.exe tools/scripts/lint_and_tests.py --strict`: estrutura e skills válidas, `346 passed` na primeira entrega; depois das decisões abaixo, `354 passed` (346 + 8); depois dos achados da revisão, `363 passed` (354 + 9), `ruff check` sem achados (`All checks passed!`), "Validação estrita concluída sem falhas"; `ruff format --check src tests`: `27 files already formatted`, nenhuma linha nova acima de 100 colunas.
+- **Evidência programática** em [`docs/evidence/2026-10-25-verificacao-v0-2.md`](../evidence/2026-10-25-verificacao-v0-2.md): ambiente virtual novo com `pip install -e .`, cliente fastmcp `Client` por stdio no executável `job-search-mcp`, bancos novos com `--seed`, data de referência 2026-03-16. Os seis casos de uso conferem; também a importação de um CSV sintético (relatório sem gravar, `--apply`, segunda importação só com duplicados, `;` com BOM aceito, linhas com erro listadas), a exportação, a proposta desatualizada e a migração de um banco da `v0.1.0` (cópia `.v1.bak`, relatório em stderr, empresas unidas, segunda abertura sem nova migração). O script foi descartável e não está versionado.
+- **Divergência encontrada:** o plano diz que `update_job` ganha `resume_track`, `salary_ask` e `contract_type`, mas o servidor não os expunha.
+
+Decisões do Supervisor, aplicadas na mesma branch:
+
+1. **O servidor segue o plano** (commit `feat`). `update_job` ganha `resume_track`, `salary_ask` e `contract_type`, opcionais e aditivos, gravados por proposta com histórico como os demais campos da candidatura (`history.UPDATABLE_FIELDS["application"]`). `resume_track` é validado contra `domain.JOB_TRACKS` (o domínio não tem valor como `none`), com `invalid_input` e `valid_values`. `contract_type` e `salary_ask` são texto livre: a importação não valida `contract_type` (o formato o descreve como "texto (CLT, PJ...)"), então reutilizar a validação dela é aceitar texto. As leituras de vaga ganham as três chaves no fim, depois de `people`, para não mexer na ordem das anteriores. Testes: `test_jobs.py` (proposta, confirmação, histórico, alteração parcial e quatro valores inválidos de `resume_track`), `test_server.py` (proposta sem gravar, confirmação, histórico com origem, `list_jobs` e valor inválido sem proposta; o caso entra também no teste parametrizado das escritas), e os testes de parâmetros, de campos alteráveis e de ordem das chaves.
+2. **Versão do pacote 0.2.0** (`job_search_mcp.__version__`; commit `chore`), com `test_smoke.py`.
+
+README, notas da versão e evidência (seção "Parâmetros novos de update_job", verificada pelo cliente programático) foram atualizados.
+
+Observação (resolvida no achado M2 abaixo): a importação aceitava `resume_track` como texto livre, enquanto `update_job` aceitava só as trilhas.
+- **Busca por dado real** (primeira entrega, refeita no estado final: ver os achados da revisão) nos 144 arquivos versionados (`git grep`): e-mails (fora `noreply@anthropic.com` e `example.com`), telefones (`+55`, `(NN) NNNN-NNNN`), valores em reais (`R$`), CPF, perfis do LinkedIn, links de plataformas de vagas e caminhos de máquina (`C:\Users`, `/home/`, `AppData`): nenhuma ocorrência, exceto as citações das buscas anteriores em `docs/specs/servidor-mcp-busca-de-emprego.md` e `docs/tasks/07-readme-e-evidencia.md` e o `%APPDATA%` genérico do README. Links em `data/`, `tests/fixtures/` e `docs/import-format.md`: só `vagas.example.com`. Nomes próprios em `src/`, `tests/`, `data/` e `evals/`: só os fictícios ("Banco Aurora", "Ana Exemplo", "Empresa Exemplo"...). O nome do autor aparece só onde é autoria (`LICENSE`, `CODEOWNERS`, `docs/case.md`). A confirmação final de que nada é real cabe ao autor.
+- **Documentos:** `README.md` (estado, 17 ferramentas em grupos, gravação em duas etapas, configuração local, importação e exportação, migração, exemplos com confirmação, arquitetura, limitações e roteiro), `docs/releases/v0.2.0.md`, critérios de aceitação marcados em `docs/specs/fonte-unica-v0-2.md` com a referência de cada evidência. `docs/case.md` não mudou: descreve a `v0.1.0`, com link para a tag.
+
+Achados da revisão (PR 25, parecer apto com ressalvas), tratados na mesma branch conforme as decisões do Supervisor:
+
+| # | Severidade | Achado | Correção |
+|---|---|---|---|
+| M1 | Média | README e notas da versão deixariam de ser verdadeiros depois da promoção ("em preparação em `develop`", "`main` continua na `v0.1.0`", "acrescente `--branch develop`", notas "rascunho, em `develop`"). | README descreve a `v0.2.0` como versão atual, com o estado da verificação manual (pendente); a instalação volta a citar `--branch develop` só para a versão de desenvolvimento; notas sem "rascunho" e sem "em `develop`", com "Data: a definir na tag". |
+| M2 | Média | `resume_track` é a trilha do currículo enviado, mas a importação o aceitava como texto livre. | A importação valida contra `domain.JOB_TRACKS`, com erro na linha e os valores válidos; `docs/import-format.md` diz "trilha do currículo enviado (`data`, `systems`, `product`, `ai`, `other`)". Teste em `test_transfer.py`. |
+| B1 | Baixa | Os três parâmetros novos de `update_job` aceitavam texto vazio, e `salary_ask` e `contract_type` não tinham limite. | Texto vazio ou só com espaços é `invalid_input` nos três; `salary_ask` e `contract_type` até 100 caracteres (`jobs.APPLICATION_TEXT_MAX`). `next_step` mantém o comportamento da `v0.1.0` (aceita vazio). Testes no domínio (vazios, longos, limite exato, `next_step` vazio) e no servidor. Frase do README sobre limpar campos ajustada. |
+| B2 | Baixa | A busca de privacidade era do estado da primeira entrega. | Refeita no estado final; registro abaixo. |
+| B3 | Baixa | O README não deixava claro que o teste à mão no Windows foi da `v0.1.0`; as notas não citavam a origem em texto livre nem a troca de `job_history` por `history`. | README: "a `v0.1.0` à mão e pela suíte, a `v0.2.0` pela suíte e pelo cliente programático". Notas: dois itens em "Mudanças de comportamento". |
+
+Busca de privacidade refeita no estado final (achado B2), sobre o commit `6004fa6`, com 146 arquivos versionados (`git ls-files`; os dois a mais que na primeira busca são a evidência e as notas da versão), com os mesmos padrões da primeira busca: e-mails fora de `noreply@anthropic.com` e `example.com`, telefones, valores em reais, CPF, perfis do LinkedIn e plataformas de vagas, caminhos de máquina, links fora de `example.com` em `data/`, `tests/fixtures/`, `config.example.toml` e `docs/import-format.md`, e qualquer menção a `workspace/career`. Nenhuma ocorrência de dado real: as únicas linhas encontradas são as próprias descrições das buscas (`docs/specs/servidor-mcp-busca-de-emprego.md`, `docs/tasks/07-readme-e-evidencia.md` e esta tarefa) e o `%APPDATA%` genérico do README. "Lauro" só como autoria (`LICENSE`, `CODEOWNERS`, `docs/case.md`) e no endereço público do repositório (`README.md`). Nomes próprios em `src/`, `tests/`, `data/` e `evals/`: só fictícios ("Ana Exemplo", "Banco Aurora", "Gabriela Ensaio", "Igor Variante", "Empresa Zeta"...). Este registro é o único conteúdo novo depois de `6004fa6`.
+
+Pendências:
+
+- Verificação manual dos seis casos no Claude Code pelo responsável humano (roteiro na evidência); depois, marcar o primeiro critério de aceitação da especificação.
+- `docs/case.md` descreve a `v0.1.0`; atualizar depois da promoção, se o autor quiser.
+- Pull request `develop` → `main`: preparado pelo Supervisor; promoção e tag dependem do responsável humano.
 
 ## Status
 
 ```text
-pendente
+concluída, exceto verificação manual pelo responsável humano
 ```

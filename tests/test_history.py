@@ -141,7 +141,7 @@ def test_reads_keep_the_v1_keys_and_add_the_new_ones(connection):
     assert list(job) == [
         "id", "company", "title", "url", "track", "score", "status", "next_step",
         "applied_on", "last_contact_on", "created_at", "company_id", "follow_up", "priority",
-        "stages", "people",
+        "stages", "people", "resume_track", "salary_ask", "contract_type",
     ]  # fmt: skip
     contact = contacts.get_contact(connection, 1)
     assert list(contact) == [

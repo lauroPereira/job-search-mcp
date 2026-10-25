@@ -176,6 +176,27 @@ def test_invalid_rows_are_reported_and_do_not_stop_the_others(empty, tmp_path):
     assert "line 4: error: invalid priority 'Z'" in report.to_text()
 
 
+def test_resume_track_must_be_one_of_the_tracks(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        {
+            "jobs.csv": (
+                "url,company,title,resume_track\n"
+                "https://vagas.example.com/1,Boa,Vaga 1,data\n"
+                "https://vagas.example.com/2,Boa,Vaga 2,currículo v3\n"
+                "https://vagas.example.com/3,Boa,Vaga 3,\n"
+            ),
+        },
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    assert report.files["jobs.csv"].new == [2, 4]
+    assert report.files["jobs.csv"].errors == [
+        (3, "invalid resume_track 'currículo v3': use one of data, systems, product, ai, other")
+    ]
+    stored = empty.execute("SELECT resume_track FROM application ORDER BY id").fetchall()
+    assert [row[0] for row in stored] == ["data", None]
+
+
 def test_a_file_with_unknown_or_missing_columns_is_refused_whole(empty, tmp_path):
     folder = write_files(
         tmp_path / "in",
