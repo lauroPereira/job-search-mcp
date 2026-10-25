@@ -265,10 +265,10 @@ def test_failed_migration_leaves_the_v1_database_untouched(tmp_path):
     try:
         with pytest.raises(sqlite3.IntegrityError, match="missing jobs") as failure:
             db.create_schema(conn)
-        # The message names the ids to fix and where the copy is.
+        # The message names the ids to fix; nothing was copied, since nothing changed.
         assert "job_history ids [4]" in str(failure.value)
         assert "contact ids []" in str(failure.value)
-        assert str(path.with_name("broken.db.v1.bak")) in str(failure.value)
+        assert "unchanged" in str(failure.value)
         assert user_version(conn) == 0
         tables = {
             row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
@@ -276,9 +276,13 @@ def test_failed_migration_leaves_the_v1_database_untouched(tmp_path):
         assert tables == {"job", "contact", "interaction", "job_history"}
         assert count(conn, "job_history") == 4
         assert conn.execute("PRAGMA foreign_keys").fetchone()[0] == 1
+        # Every tool call opens the database again: no copy piles up.
+        for _ in range(3):
+            with pytest.raises(sqlite3.IntegrityError, match="missing jobs"):
+                db.create_schema(conn)
     finally:
         conn.close()
-    assert path.with_name("broken.db.v1.bak").exists()
+    assert not list(tmp_path.glob("*.bak"))
 
 
 def test_in_memory_v1_database_migrates_without_backup(tmp_path, monkeypatch):

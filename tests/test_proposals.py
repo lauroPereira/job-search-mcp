@@ -245,3 +245,39 @@ def test_an_existing_version_2_database_gets_the_proposal_table(tmp_path):
         assert count(connection, "proposal") == 0
     finally:
         connection.close()
+
+
+def stored(connection, proposal_id):
+    row = connection.execute(
+        "SELECT tool, status, arguments, preview, created_at, expires_at FROM proposal"
+        " WHERE id = ?",
+        (proposal_id,),
+    )
+    return tuple(row.fetchone())
+
+
+def test_proposals_that_will_never_apply_keep_no_arguments_or_preview(connection):
+    discarded = propose(connection, *WRITES[2])
+    proposals.discard(connection, discarded["id"], NOW)
+    expired = propose(connection, *WRITES[1])
+    proposals.list_pending(connection, NOW + timedelta(hours=24))
+    stale = propose(connection, "update_job", {**WRITES[1][1], "next_step": "Primeiro"})
+    other = propose(connection, "update_job", {**WRITES[1][1], "next_step": "Segundo"})
+    proposals.confirm(connection, other["id"], NOW)
+    proposals.confirm(connection, stale["id"], NOW)
+    for proposal, status_, tool in (
+        (discarded, "discarded", "log_interaction"),
+        (expired, "expired", "update_job"),
+        (stale, "stale", "update_job"),
+    ):
+        assert stored(connection, proposal["id"]) == (
+            tool,
+            status_,
+            "{}",
+            "{}",
+            "2026-03-16 12:00:00",
+            proposal["expires_at"],
+        )
+    applied = stored(connection, other["id"])
+    assert applied[1] == "applied"
+    assert "Segundo" in applied[2]

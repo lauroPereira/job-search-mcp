@@ -5,6 +5,10 @@ the records read. Confirming recalculates the plan with the same function that b
 preview and applies it only when the versions and the preview are still the same; otherwise
 the proposal is stale. Proposals expire after `proposal_ttl_hours` (local settings) and
 expired ones never change anything. No function here reads the clock: `now` comes in.
+
+A proposal that will never be applied (discarded, expired or stale) keeps only its id, tool,
+status, versions and dates: its arguments and preview, which may hold personal notes, are
+replaced by CLEARED.
 """
 
 import json
@@ -22,6 +26,9 @@ PLANNERS = {
     "log_interaction": contacts.plan_log_interaction,
 }
 PENDING = "pending"
+# What arguments and preview hold once a proposal can no longer be applied (the columns are
+# NOT NULL in databases that already have the table).
+CLEARED = "{}"
 # Timestamps in UTC, in the format of the created_at columns, so text order is time order.
 TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -91,10 +98,19 @@ def _set_status(connection: sqlite3.Connection, proposal_id: str, status: str) -
     connection.execute("UPDATE proposal SET status = ? WHERE id = ?", (status, proposal_id))
 
 
+def _close(connection: sqlite3.Connection, proposal_id: str, status: str) -> None:
+    """Mark a proposal that will never be applied (discarded or stale) and clear its data."""
+    connection.execute(
+        "UPDATE proposal SET status = ?, arguments = ?, preview = ? WHERE id = ?",
+        (status, CLEARED, CLEARED, proposal_id),
+    )
+
+
 def _expire(connection: sqlite3.Connection, now: datetime) -> None:
     connection.execute(
-        "UPDATE proposal SET status = 'expired' WHERE status = ? AND expires_at <= ?",
-        (PENDING, _timestamp(now)),
+        "UPDATE proposal SET status = 'expired', arguments = ?, preview = ?"
+        " WHERE status = ? AND expires_at <= ?",
+        (CLEARED, CLEARED, PENDING, _timestamp(now)),
     )
 
 
@@ -159,13 +175,13 @@ def confirm(
             return proposal
         plan = _plan(connection, proposal["tool"], json.loads(proposal["arguments"]), settings)
         if domain.is_error(plan):
-            _set_status(connection, proposal_id, "stale")
+            _close(connection, proposal_id, "stale")
             return _stale(proposal_id, plan)
         if (
             _canonical(plan.changes) != proposal["preview"]
             or _canonical(plan.base_versions) != proposal["base_versions"]
         ):
-            _set_status(connection, proposal_id, "stale")
+            _close(connection, proposal_id, "stale")
             return _stale(proposal_id)
         result = plan.apply()
         _set_status(connection, proposal_id, "applied")
@@ -181,7 +197,7 @@ def discard(connection: sqlite3.Connection, proposal_id: str, now: datetime) -> 
         proposal = _pending(connection, proposal_id, now)
         if domain.is_error(proposal):
             return proposal
-        _set_status(connection, proposal_id, "discarded")
+        _close(connection, proposal_id, "discarded")
     return {"proposal": {"id": proposal_id, "tool": proposal["tool"], "status": "discarded"}}
 
 

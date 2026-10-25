@@ -339,6 +339,9 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
     """Migrate a v0.1.0 database (version 0) to the version 2 without losing data.
 
     Runs inside the caller's transaction, with foreign keys off; returns the report lines.
+    - References to missing jobs are looked for first, reading only: when there is one,
+      the migration stops naming the ids, before any copy is made (so opening a broken
+      database again and again does not pile up copies).
     - The database is copied to a free <name>.v1.bak path before anything changes.
     - Companies come from the texts of job.company and contact.company, joined by
       normalized name; the name kept is the first one seen (jobs first, then contacts, by id).
@@ -349,10 +352,7 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
       link with role 'contact' and confirmed true.
     - job_history goes to history with entity 'application', source_type 'user' and the
       original free text of source in source_ref.
-    A link or history line pointing to a missing job stops the migration, naming the ids.
     """
-    backup = _backup(connection)
-    report = [f"Migrating the database to schema version {SCHEMA_VERSION}; copy at {backup}."]
     orphan_contacts = [
         row[0]
         for row in connection.execute(
@@ -369,9 +369,11 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
     if orphan_contacts or orphan_lines:
         raise sqlite3.IntegrityError(
             "The v0.1.0 database points to missing jobs (contact ids "
-            f"{orphan_contacts}, job_history ids {orphan_lines}); nothing was migrated. "
-            f"Fix them and open it again; a copy is at {backup}."
+            f"{orphan_contacts}, job_history ids {orphan_lines}); nothing was migrated and "
+            "the database is unchanged. Fix them and open it again."
         )
+    backup = _backup(connection)
+    report = [f"Migrating the database to schema version {SCHEMA_VERSION}; copy at {backup}."]
 
     joined = {}
 
