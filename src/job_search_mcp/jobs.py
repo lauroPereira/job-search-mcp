@@ -72,7 +72,23 @@ def list_jobs(
     return [job_to_dict(row, settings) for row in rows]
 
 
-def add_job(
+def _changed_on(field: str, value: str | date) -> date | dict:
+    """The date written in the history, or a structured error when it is not a valid date."""
+    try:
+        parsed = to_date(value)
+    except (ValueError, TypeError):
+        parsed = None
+    return parsed if parsed is not None else domain.invalid_date(field, value)
+
+
+def parse_source(source: str) -> tuple[str, str | None] | dict:
+    """(source_type, source_ref) of a source given by the user, or an error when it is empty."""
+    if not isinstance(source, str) or not source.strip():
+        return domain.error("invalid_input", "Field 'source' is required.")
+    return history.split_source(source)
+
+
+def plan_add_job(
     connection: sqlite3.Connection,
     company: str,
     title: str,
@@ -80,13 +96,20 @@ def add_job(
     track: str | None = None,
     score: float | None = None,
     next_step: str | None = None,
+    *,
+    reference_date: str | date,
+    source: str = domain.USER_SOURCE,
     settings: Settings | None = None,
-) -> dict:
-    """Register a job in the initial status, refusing a URL that is already registered.
+) -> domain.Plan | dict:
+    """Plan the registration of a job in the initial status, without writing anything.
 
-    `track`, when informed, must be one of domain.JOB_TRACKS and `score` a number from
-    domain.SCORE_MIN to domain.SCORE_MAX; otherwise nothing is created and the result is
-    the error 'invalid_input'.
+    Refuses a URL that is already registered (duplicate_url). `track`, when informed, must
+    be one of domain.JOB_TRACKS and `score` a number from domain.SCORE_MIN to
+    domain.SCORE_MAX; otherwise the result is the error 'invalid_input'. `source` says
+    where the job came from (see history.split_source) and `reference_date` is the date
+    written in the history. The plan creates the company when no company has the same
+    normalized name, the job and its application, with one history line per informed
+    field; applying it returns the created job.
     """
     for field, value in (("company", company), ("title", title), ("url", url)):
         if not value or not value.strip():
@@ -95,6 +118,12 @@ def add_job(
         return domain.invalid_track(track)
     if score is not None and not domain.is_valid_score(score):
         return domain.invalid_score(score)
+    origin = parse_source(source)
+    if domain.is_error(origin):
+        return origin
+    changed_on = _changed_on("reference_date", reference_date)
+    if domain.is_error(changed_on):
+        return changed_on
     url = url.strip()
     existing = connection.execute("SELECT id FROM job WHERE url = ?", (url,)).fetchone()
     if existing:
@@ -103,16 +132,54 @@ def add_job(
             f"A job with this URL already exists (id {existing['id']}).",
             job=get_job(connection, existing["id"], settings),
         )
-    with connection:
-        cursor = connection.execute(
+    stored_company = connection.execute(
+        "SELECT name FROM company WHERE normalized_name = ?", (db.normalize_name(company),)
+    ).fetchone()
+    company_name = stored_company[0] if stored_company else company.strip()
+    job_values = {
+        "company": company_name,
+        "title": title.strip(),
+        "url": url,
+        "track": track,
+        "score": score,
+    }
+    application_values = {"status": INITIAL_STATUS, "next_step": next_step}
+    changes = [] if stored_company else history.creation("company", {"name": company_name})
+    changes += history.creation("job", job_values)
+    changes += history.creation("application", application_values)
+
+    def apply() -> dict:
+        company_id = db.ensure_company(connection, company_name)
+        if not stored_company:
+            history.record_creation(
+                connection, "company", company_id, {"name": company_name}, changed_on, *origin
+            )
+        job_id = connection.execute(
             "INSERT INTO job (company_id, title, url, track, score) VALUES (?, ?, ?, ?, ?)",
-            (db.ensure_company(connection, company), title.strip(), url, track, score),
-        )
-        connection.execute(
+            (company_id, job_values["title"], url, track, score),
+        ).lastrowid
+        new_application_id = connection.execute(
             "INSERT INTO application (job_id, status, next_step) VALUES (?, ?, ?)",
-            (cursor.lastrowid, INITIAL_STATUS, next_step),
+            (job_id, INITIAL_STATUS, next_step),
+        ).lastrowid
+        history.record_creation(connection, "job", job_id, job_values, changed_on, *origin)
+        history.record_creation(
+            connection,
+            "application",
+            new_application_id,
+            application_values,
+            changed_on,
+            *origin,
         )
-    return get_job(connection, cursor.lastrowid, settings)
+        return get_job(connection, job_id, settings)
+
+    return domain.Plan(changes=changes, base_versions={}, apply=apply)
+
+
+def application_id(connection: sqlite3.Connection, job_id: int) -> int:
+    """Id of the application of a job (every job has exactly one)."""
+    row = connection.execute("SELECT id FROM application WHERE job_id = ?", (job_id,))
+    return row.fetchone()[0]
 
 
 def apply_job_changes(
@@ -130,11 +197,15 @@ def apply_job_changes(
     reference of the origin when there is one, otherwise its type). A field outside
     JOB_UPDATABLE_FIELDS raises ValueError before anything is written.
     """
-    application_id = connection.execute(
-        "SELECT id FROM application WHERE job_id = ?", (job["id"],)
-    ).fetchone()[0]
     lines = history.record_changes(
-        connection, "application", application_id, job, changes, changed_on, source_type, source_ref
+        connection,
+        "application",
+        application_id(connection, job["id"]),
+        job,
+        changes,
+        changed_on,
+        source_type,
+        source_ref,
     )
     return [
         {
@@ -149,7 +220,7 @@ def apply_job_changes(
     ]
 
 
-def update_job(
+def plan_update_job(
     connection: sqlite3.Connection,
     job_id: int,
     source: str,
@@ -159,26 +230,24 @@ def update_job(
     applied_on: str | date | None = None,
     last_contact_on: str | date | None = None,
     settings: Settings | None = None,
-) -> dict:
-    """Update the informed fields of a job and record each change in the history.
+) -> domain.Plan | dict:
+    """Plan the update of the informed fields of a job, without writing anything.
 
     `source` says where the change came from: a known type of origin
     (domain.SOURCE_TYPES) is stored as it is; any other text as the type 'user', with the
-    text as the reference. `reference_date` (a date or ISO text) is
-    the date written in the history. Fields left as None are not touched. When the status
-    changes to applied and the job has no application date, neither stored nor informed,
-    `applied_on` is filled with the reference date, so the job starts to have a follow-up.
-    Returns the updated job and the history lines created, or a structured error without
-    changing anything.
+    text as the reference. `reference_date` (a date or ISO text) is the date written in
+    the history. Fields left as None are not touched. When the status changes to applied
+    and the job has no application date, neither stored nor informed, `applied_on` is
+    filled with the reference date, so the job starts to have a follow-up. The plan
+    depends on the version of the application; applying it returns the updated job and
+    the history lines created. Errors are structured and nothing is planned.
     """
-    if not source or not source.strip():
-        return domain.error("invalid_input", "Field 'source' is required.")
-    try:
-        changed_on = to_date(reference_date)
-    except (ValueError, TypeError):
-        changed_on = None
-    if changed_on is None:
-        return domain.invalid_date("reference_date", reference_date)
+    origin = parse_source(source)
+    if domain.is_error(origin):
+        return origin
+    changed_on = _changed_on("reference_date", reference_date)
+    if domain.is_error(changed_on):
+        return changed_on
     job = get_job(connection, job_id, settings)
     if job is None:
         return domain.not_found("job", job_id)
@@ -195,8 +264,16 @@ def update_job(
     if becomes_applied and not job["applied_on"] and changes["applied_on"] is None:
         changes["applied_on"] = changed_on.isoformat()
     changes = {field: value for field, value in changes.items() if value is not None}
-    with connection:
-        lines = apply_job_changes(
-            connection, job, changes, *history.split_source(source), changed_on
-        )
-    return {"job": get_job(connection, job_id, settings), "history": lines}
+    record_id = application_id(connection, job_id)
+
+    def apply() -> dict:
+        lines = apply_job_changes(connection, job, changes, *origin, changed_on)
+        return {"job": get_job(connection, job_id, settings), "history": lines}
+
+    return domain.Plan(
+        changes=history.diff("application", record_id, job, changes),
+        base_versions={
+            f"application:{record_id}": history.read_version(connection, "application", record_id)
+        },
+        apply=apply,
+    )

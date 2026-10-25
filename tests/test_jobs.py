@@ -2,10 +2,13 @@ import json
 from datetime import date, datetime
 
 import pytest
+from helpers import write
 
 from job_search_mcp import domain, jobs
 
 NEW_URL = "https://vagas.example.com/empresa-exemplo/data-engineer"
+
+ADDED_ON = date(2026, 3, 16)
 
 
 def count(connection, table):
@@ -55,14 +58,18 @@ def test_list_jobs_with_invalid_status_returns_error(connection):
 
 
 def test_add_job_creates_job_in_initial_status(connection):
-    job = jobs.add_job(
+    job = write(
         connection,
-        "Empresa Exemplo",
-        "Data Engineer",
-        NEW_URL,
-        track="data",
-        score=7.0,
-        next_step="Avaliar aderência",
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Data Engineer",
+            NEW_URL,
+            track="data",
+            score=7.0,
+            next_step="Avaliar aderência",
+            reference_date=ADDED_ON,
+        ),
     )
     assert not domain.is_error(job)
     assert job["id"] == 16
@@ -77,7 +84,12 @@ def test_add_job_creates_job_in_initial_status(connection):
 
 def test_add_job_with_duplicate_url_returns_error_and_creates_nothing(connection):
     existing_url = "https://vagas.example.com/banco-aurora/data-engineer"
-    result = jobs.add_job(connection, "Outra Empresa", "Outro Cargo", existing_url)
+    result = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Outra Empresa", "Outro Cargo", existing_url, reference_date=ADDED_ON
+        ),
+    )
     assert result["error"] == "duplicate_url"
     assert result["detail"]
     assert result["job"]["id"] == 1
@@ -86,9 +98,19 @@ def test_add_job_with_duplicate_url_returns_error_and_creates_nothing(connection
 
 
 def test_add_job_twice_with_the_same_url_keeps_only_the_first(connection):
-    first = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", NEW_URL)
+    first = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Data Engineer", NEW_URL, reference_date=ADDED_ON
+        ),
+    )
     assert first["id"] == 16
-    second = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", f"  {NEW_URL} ")
+    second = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Data Engineer", f"  {NEW_URL} ", reference_date=ADDED_ON
+        ),
+    )
     assert second["error"] == "duplicate_url"
     assert second["job"]["id"] == 16
     assert count(connection, "job") == 16
@@ -100,28 +122,60 @@ def test_add_job_requires_company_title_and_url(connection):
         ("Empresa Exemplo", " ", NEW_URL),
         ("Empresa Exemplo", "Data Engineer", None),
     ):
-        result = jobs.add_job(connection, *arguments)
+        result = write(
+            connection, jobs.plan_add_job(connection, *arguments, reference_date=ADDED_ON)
+        )
         assert result["error"] == "invalid_input"
     assert count(connection, "job") == 15
 
 
 def test_add_job_accepts_every_track_and_the_score_limits(connection):
     for number, track in enumerate(domain.JOB_TRACKS):
-        job = jobs.add_job(connection, "Empresa Exemplo", "Cargo", f"{NEW_URL}/{track}", track)
+        job = write(
+            connection,
+            jobs.plan_add_job(
+                connection,
+                "Empresa Exemplo",
+                "Cargo",
+                f"{NEW_URL}/{track}",
+                track,
+                reference_date=ADDED_ON,
+            ),
+        )
         assert job["track"] == track
         assert job["id"] == 16 + number
     for score in (0, 10, 0.0, 10.0, 7.5):
         url = f"{NEW_URL}/{score!r}"
-        job = jobs.add_job(connection, "Empresa Exemplo", "Cargo", url, score=score)
+        job = write(
+            connection,
+            jobs.plan_add_job(
+                connection, "Empresa Exemplo", "Cargo", url, score=score, reference_date=ADDED_ON
+            ),
+        )
         assert job["score"] == score
-    without = jobs.add_job(connection, "Empresa Exemplo", "Cargo", f"{NEW_URL}/none")
+    without = write(
+        connection,
+        jobs.plan_add_job(
+            connection, "Empresa Exemplo", "Cargo", f"{NEW_URL}/none", reference_date=ADDED_ON
+        ),
+    )
     assert without["track"] is None
     assert without["score"] is None
 
 
 @pytest.mark.parametrize("track", ["dados", "Data", "", " data", "backend"])
 def test_add_job_with_invalid_track_returns_error_and_creates_nothing(connection, track):
-    result = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", NEW_URL, track=track)
+    result = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Data Engineer",
+            NEW_URL,
+            track=track,
+            reference_date=ADDED_ON,
+        ),
+    )
     assert result["error"] == "invalid_input"
     assert "track" in result["detail"]
     assert result["valid_tracks"] == ["data", "systems", "product", "ai", "other"]
@@ -130,7 +184,17 @@ def test_add_job_with_invalid_track_returns_error_and_creates_nothing(connection
 
 @pytest.mark.parametrize("score", [-0.1, 10.1, 11, -1, float("nan"), float("inf"), True, "8"])
 def test_add_job_with_invalid_score_returns_error_and_creates_nothing(connection, score):
-    result = jobs.add_job(connection, "Empresa Exemplo", "Data Engineer", NEW_URL, score=score)
+    result = write(
+        connection,
+        jobs.plan_add_job(
+            connection,
+            "Empresa Exemplo",
+            "Data Engineer",
+            NEW_URL,
+            score=score,
+            reference_date=ADDED_ON,
+        ),
+    )
     assert result["error"] == "invalid_input"
     assert "score" in result["detail"]
     assert "0 to 10" in result["detail"]
@@ -144,8 +208,11 @@ def test_seed_jobs_respect_the_track_and_score_rules(connection):
 
 
 def test_update_job_status_generates_history_with_old_and_new_value(connection, reference_date):
-    result = jobs.update_job(
-        connection, 8, source="usuário", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 8, source="usuário", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["job"]["status"] == "applied"
     assert result["history"][0] == {
@@ -169,8 +236,11 @@ def test_update_job_to_applied_without_application_date_fills_it_with_the_refere
     connection, reference_date
 ):
     assert jobs.get_job(connection, 8)["applied_on"] is None
-    result = jobs.update_job(
-        connection, 8, source="usuário", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 8, source="usuário", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["job"]["applied_on"] == "2026-03-16"
     assert result["job"]["follow_up"] == "2026-03-23"  # the job now has a follow-up
@@ -186,13 +256,16 @@ def test_update_job_to_applied_without_application_date_fills_it_with_the_refere
 
 
 def test_update_job_to_applied_keeps_the_informed_application_date(connection, reference_date):
-    result = jobs.update_job(
+    result = write(
         connection,
-        8,
-        source="usuário",
-        reference_date=reference_date,
-        status="applied",
-        applied_on="2026-03-12",
+        jobs.plan_update_job(
+            connection,
+            8,
+            source="usuário",
+            reference_date=reference_date,
+            status="applied",
+            applied_on="2026-03-12",
+        ),
     )
     assert result["job"]["applied_on"] == "2026-03-12"
     assert result["job"]["follow_up"] == "2026-03-19"
@@ -202,8 +275,11 @@ def test_update_job_to_applied_keeps_the_informed_application_date(connection, r
 
 def test_update_job_to_applied_keeps_the_stored_application_date(connection, reference_date):
     # Job 3 is in_review and already has an application date: going back to applied keeps it.
-    result = jobs.update_job(
-        connection, 3, source="usuário", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 3, source="usuário", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["job"]["applied_on"] == "2026-03-05"
     assert [line["field"] for line in result["history"]] == ["status"]
@@ -212,22 +288,28 @@ def test_update_job_to_applied_keeps_the_stored_application_date(connection, ref
 def test_update_job_to_another_status_does_not_fill_the_application_date(
     connection, reference_date
 ):
-    result = jobs.update_job(
-        connection, 8, source="usuário", reference_date=reference_date, status="blocked"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 8, source="usuário", reference_date=reference_date, status="blocked"
+        ),
     )
     assert result["job"]["applied_on"] is None
     assert [line["field"] for line in result["history"]] == ["status"]
 
 
 def test_update_job_records_one_history_line_per_changed_field(connection, reference_date):
-    result = jobs.update_job(
+    result = write(
         connection,
-        8,
-        source="usuário",
-        reference_date=reference_date,
-        status="applied",
-        next_step="Aguardar triagem",
-        applied_on="2026-03-16",
+        jobs.plan_update_job(
+            connection,
+            8,
+            source="usuário",
+            reference_date=reference_date,
+            status="applied",
+            next_step="Aguardar triagem",
+            applied_on="2026-03-16",
+        ),
     )
     assert [line["field"] for line in result["history"]] == ["status", "next_step", "applied_on"]
     assert result["history"][1]["old_value"] == "Adaptar o currículo e enviar"
@@ -239,12 +321,15 @@ def test_update_job_records_one_history_line_per_changed_field(connection, refer
 
 
 def test_update_job_accepts_date_objects_and_moves_the_follow_up(connection, reference_date):
-    result = jobs.update_job(
+    result = write(
         connection,
-        1,
-        source="usuário",
-        reference_date=reference_date,
-        last_contact_on=reference_date,
+        jobs.plan_update_job(
+            connection,
+            1,
+            source="usuário",
+            reference_date=reference_date,
+            last_contact_on=reference_date,
+        ),
     )
     assert result["job"]["last_contact_on"] == "2026-03-16"
     assert result["job"]["follow_up"] == "2026-03-23"
@@ -252,8 +337,11 @@ def test_update_job_accepts_date_objects_and_moves_the_follow_up(connection, ref
 
 
 def test_update_job_without_real_change_generates_no_history(connection, reference_date):
-    result = jobs.update_job(
-        connection, 1, source="usuário", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 1, source="usuário", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["history"] == []
     assert result["job"]["status"] == "applied"
@@ -264,13 +352,16 @@ def test_update_job_with_invalid_status_returns_error_and_changes_nothing(
     connection, reference_date
 ):
     before = jobs.get_job(connection, 1)
-    result = jobs.update_job(
+    result = write(
         connection,
-        1,
-        source="usuário",
-        reference_date=reference_date,
-        status="done",
-        next_step="Não deve ser gravado",
+        jobs.plan_update_job(
+            connection,
+            1,
+            source="usuário",
+            reference_date=reference_date,
+            status="done",
+            next_step="Não deve ser gravado",
+        ),
     )
     assert result["error"] == "invalid_status"
     assert result["valid_statuses"] == list(domain.JOB_STATUSES)
@@ -281,13 +372,16 @@ def test_update_job_with_invalid_status_returns_error_and_changes_nothing(
 
 def test_update_job_with_invalid_date_returns_error_and_changes_nothing(connection, reference_date):
     before = jobs.get_job(connection, 1)
-    result = jobs.update_job(
+    result = write(
         connection,
-        1,
-        source="usuário",
-        reference_date=reference_date,
-        status="in_review",
-        applied_on="16/03/2026",
+        jobs.plan_update_job(
+            connection,
+            1,
+            source="usuário",
+            reference_date=reference_date,
+            status="in_review",
+            applied_on="16/03/2026",
+        ),
     )
     assert result["error"] == "invalid_date"
     assert jobs.get_job(connection, 1) == before
@@ -295,16 +389,22 @@ def test_update_job_with_invalid_date_returns_error_and_changes_nothing(connecti
 
 
 def test_update_job_unknown_id_returns_error(connection, reference_date):
-    result = jobs.update_job(
-        connection, 999, source="usuário", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 999, source="usuário", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["error"] == "not_found"
     assert "999" in result["detail"]
 
 
 def test_update_job_requires_source(connection, reference_date):
-    result = jobs.update_job(
-        connection, 8, source=" ", reference_date=reference_date, status="applied"
+    result = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 8, source=" ", reference_date=reference_date, status="applied"
+        ),
     )
     assert result["error"] == "invalid_input"
     assert jobs.get_job(connection, 8)["status"] == "to_apply"
@@ -313,13 +413,16 @@ def test_update_job_requires_source(connection, reference_date):
 def test_update_job_with_datetime_stores_only_the_date_and_keeps_listing_working(
     connection, reference_date
 ):
-    result = jobs.update_job(
+    result = write(
         connection,
-        1,
-        source="usuário",
-        reference_date=reference_date,
-        applied_on=datetime(2026, 3, 3, 9, 15),
-        last_contact_on=datetime(2026, 3, 16, 14, 30, 59),
+        jobs.plan_update_job(
+            connection,
+            1,
+            source="usuário",
+            reference_date=reference_date,
+            applied_on=datetime(2026, 3, 3, 9, 15),
+            last_contact_on=datetime(2026, 3, 16, 14, 30, 59),
+        ),
     )
     assert result["job"]["applied_on"] == "2026-03-03"
     assert result["job"]["last_contact_on"] == "2026-03-16"
@@ -337,13 +440,16 @@ def test_update_job_with_non_text_date_returns_error_and_changes_nothing(
     connection, reference_date
 ):
     before = jobs.get_job(connection, 8)
-    result = jobs.update_job(
+    result = write(
         connection,
-        8,
-        source="usuário",
-        reference_date=reference_date,
-        status="applied",
-        applied_on=20260316,
+        jobs.plan_update_job(
+            connection,
+            8,
+            source="usuário",
+            reference_date=reference_date,
+            status="applied",
+            applied_on=20260316,
+        ),
     )
     assert result["error"] == "invalid_date"
     assert "applied_on" in result["detail"]
@@ -352,13 +458,19 @@ def test_update_job_with_non_text_date_returns_error_and_changes_nothing(
 
 
 def test_update_job_accepts_reference_date_as_iso_text_or_datetime(connection):
-    as_text = jobs.update_job(
-        connection, 9, source="usuário", reference_date="2026-03-16", status="applied"
+    as_text = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 9, source="usuário", reference_date="2026-03-16", status="applied"
+        ),
     )
     assert [line["date"] for line in as_text["history"]] == ["2026-03-16", "2026-03-16"]
     assert as_text["job"]["applied_on"] == "2026-03-16"
-    as_datetime = jobs.update_job(
-        connection, 10, "usuário", datetime(2026, 3, 16, 8, 0), status="applied"
+    as_datetime = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 10, "usuário", datetime(2026, 3, 16, 8, 0), status="applied"
+        ),
     )
     assert as_datetime["history"][0]["date"] == "2026-03-16"
     assert as_datetime["job"]["applied_on"] == "2026-03-16"
@@ -367,8 +479,11 @@ def test_update_job_accepts_reference_date_as_iso_text_or_datetime(connection):
 def test_update_job_with_invalid_reference_date_returns_error_and_changes_nothing(connection):
     before = jobs.get_job(connection, 8)
     for value in ("16/03/2026", None, 20260316):
-        result = jobs.update_job(
-            connection, 8, source="usuário", reference_date=value, status="applied"
+        result = write(
+            connection,
+            jobs.plan_update_job(
+                connection, 8, source="usuário", reference_date=value, status="applied"
+            ),
         )
         assert result["error"] == "invalid_date"
         assert "reference_date" in result["detail"]

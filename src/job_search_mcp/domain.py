@@ -3,6 +3,8 @@
 No function here reads the current date: the reference date always comes in as a parameter.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date, timedelta
 
 from job_search_mcp.db import to_date
@@ -59,12 +61,28 @@ DUE_SOON = "due_soon"
 ON_TRACK = "on_track"
 
 
+@dataclass(frozen=True)
+class Plan:
+    """What a write operation would do, calculated without writing anything.
+
+    `changes` is the preview: one dict per field, with entity, record_id (None for a record
+    still to be created), field, old_value and new_value. `base_versions` maps
+    "entity:id" to the `version` read from each record the operation depends on. `apply`
+    writes the changes without committing (the caller owns the transaction) and returns
+    the result of the operation.
+    """
+
+    changes: list[dict]
+    base_versions: dict[str, int]
+    apply: Callable[[], dict]
+
+
 def error(code: str, detail: str, **extra) -> dict:
     """Build the structured business error every operation returns instead of raising.
 
     `error` is a stable code (invalid_status, duplicate_url, not_found, invalid_date,
-    invalid_input) and `detail` a message the agent can relay. Extra keys carry context,
-    such as the valid statuses or the existing job.
+    invalid_input, stale_proposal, expired_proposal) and `detail` a message the agent can
+    relay. Extra keys carry context, such as the valid statuses or the existing job.
     """
     return {"error": code, "detail": detail, **extra}
 

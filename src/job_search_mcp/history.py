@@ -1,4 +1,9 @@
-"""The single place that writes changes of any entity together with their history lines."""
+"""The single place that writes changes of any entity together with their history lines.
+
+History covers the records that can be changed (the tables with `version`): every field a
+write creates or changes gets one line with its origin. Interactions are an append-only
+log, so their own row is the trace and they get no history lines.
+"""
 
 import sqlite3
 from datetime import date
@@ -10,6 +15,8 @@ UPDATABLE_FIELDS = {
     "application": ("status", "next_step", "applied_on", "last_contact_on"),
     "contact": ("status", "next_step", "last_contact_on"),
 }
+# The tables whose `version` may be read: they go into the SELECT text.
+VERSIONED_TABLES = ("company", "job", "application", "contact")
 
 
 def split_source(source: str) -> tuple[str, str | None]:
@@ -22,6 +29,85 @@ def split_source(source: str) -> tuple[str, str | None]:
     if source in domain.SOURCE_TYPES:
         return source, None
     return domain.USER_SOURCE, source
+
+
+def change(entity: str, record_id: int | None, field: str, old_value, new_value) -> dict:
+    """One line of a preview: a field of a record with its current and proposed value."""
+    return {
+        "entity": entity,
+        "record_id": record_id,
+        "field": field,
+        "old_value": old_value,
+        "new_value": new_value,
+    }
+
+
+def creation(entity: str, values: dict) -> list[dict]:
+    """Preview of a record still to be created: one line per informed (not None) field."""
+    return [
+        change(entity, None, field, None, value)
+        for field, value in values.items()
+        if value is not None
+    ]
+
+
+def diff(entity: str, record_id: int, current: dict, changes: dict) -> list[dict]:
+    """Preview of an update: one line per field whose new value differs from the stored one.
+
+    An unknown entity or field raises ValueError.
+    """
+    allowed = UPDATABLE_FIELDS.get(entity)
+    if allowed is None:
+        raise ValueError(f"Entity not allowed in an update: {entity}.")
+    unknown = [field for field in changes if field not in allowed]
+    if unknown:
+        raise ValueError(f"Fields not allowed in a {entity} update: {', '.join(unknown)}.")
+    return [
+        change(entity, record_id, field, current[field], value)
+        for field, value in changes.items()
+        if value != current[field]
+    ]
+
+
+def read_version(connection: sqlite3.Connection, entity: str, record_id: int) -> int | None:
+    """The stored `version` of a record, or None when it does not exist."""
+    if entity not in VERSIONED_TABLES:
+        raise ValueError(f"Entity without version: {entity}.")
+    row = connection.execute(f"SELECT version FROM {entity} WHERE id = ?", (record_id,))
+    found = row.fetchone()
+    return found[0] if found else None
+
+
+def _check_source(source_type: str) -> None:
+    if source_type not in domain.SOURCE_TYPES:
+        raise ValueError(f"Unknown source type: {source_type}.")
+
+
+def _insert_lines(
+    connection: sqlite3.Connection,
+    lines: list[dict],
+    record_id: int,
+    changed_on: date,
+    source_type: str,
+    source_ref: str | None,
+) -> list[dict]:
+    written = []
+    for line in lines:
+        full = {
+            **line,
+            "record_id": record_id,
+            "date": changed_on.isoformat(),
+            "source_type": source_type,
+            "source_ref": source_ref,
+        }
+        connection.execute(
+            "INSERT INTO history (entity, record_id, field, old_value, new_value, date,"
+            " source_type, source_ref) VALUES (:entity, :record_id, :field, :old_value,"
+            " :new_value, :date, :source_type, :source_ref)",
+            full,
+        )
+        written.append(full)
+    return written
 
 
 def record_changes(
@@ -42,39 +128,32 @@ def record_changes(
     An unknown entity or field, or an unknown source type, raises ValueError before
     anything is written.
     """
-    allowed = UPDATABLE_FIELDS.get(entity)
-    if allowed is None:
-        raise ValueError(f"Entity not allowed in an update: {entity}.")
-    unknown = [field for field in changes if field not in allowed]
-    if unknown:
-        raise ValueError(f"Fields not allowed in a {entity} update: {', '.join(unknown)}.")
-    if source_type not in domain.SOURCE_TYPES:
-        raise ValueError(f"Unknown source type: {source_type}.")
-    changed = {field: value for field, value in changes.items() if value != current[field]}
-    if not changed:
+    lines = diff(entity, record_id, current, changes)
+    _check_source(source_type)
+    if not lines:
         return []
-    assignments = ", ".join(f"{field} = ?" for field in changed)
+    assignments = ", ".join(f"{line['field']} = ?" for line in lines)
     connection.execute(
         f"UPDATE {entity} SET {assignments}, version = version + 1 WHERE id = ?",
-        (*changed.values(), record_id),
+        (*(line["new_value"] for line in lines), record_id),
     )
-    lines = []
-    for field, new_value in changed.items():
-        line = {
-            "entity": entity,
-            "record_id": record_id,
-            "field": field,
-            "old_value": current[field],
-            "new_value": new_value,
-            "date": changed_on.isoformat(),
-            "source_type": source_type,
-            "source_ref": source_ref,
-        }
-        connection.execute(
-            "INSERT INTO history (entity, record_id, field, old_value, new_value, date,"
-            " source_type, source_ref) VALUES (:entity, :record_id, :field, :old_value,"
-            " :new_value, :date, :source_type, :source_ref)",
-            line,
-        )
-        lines.append(line)
-    return lines
+    return _insert_lines(connection, lines, record_id, changed_on, source_type, source_ref)
+
+
+def record_creation(
+    connection: sqlite3.Connection,
+    entity: str,
+    record_id: int,
+    values: dict,
+    changed_on: date,
+    source_type: str,
+    source_ref: str | None = None,
+) -> list[dict]:
+    """Write one history line for each informed field of a record just created.
+
+    The record itself is inserted by the caller; does not commit. Returns the lines
+    created. An unknown source type raises ValueError before anything is written.
+    """
+    _check_source(source_type)
+    lines = creation(entity, values)
+    return _insert_lines(connection, lines, record_id, changed_on, source_type, source_ref)

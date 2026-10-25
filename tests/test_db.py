@@ -60,6 +60,7 @@ def test_create_schema_creates_the_version_2_tables(tmp_path):
         "contact",
         "interaction",
         "history",
+        "proposal",
     }
     assert version == db.SCHEMA_VERSION == 2
     assert not list(tmp_path.glob("*.bak"))  # a new database is not migrated

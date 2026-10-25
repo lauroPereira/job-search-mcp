@@ -136,6 +136,18 @@ CREATE TABLE IF NOT EXISTS history (
 );
 
 CREATE INDEX IF NOT EXISTS history_record ON history (entity, record_id);
+
+CREATE TABLE IF NOT EXISTS proposal (
+    id TEXT PRIMARY KEY,
+    tool TEXT NOT NULL,
+    arguments TEXT NOT NULL,
+    preview TEXT NOT NULL,
+    base_versions TEXT NOT NULL,
+    status TEXT NOT NULL
+        CHECK (status IN ('pending', 'applied', 'discarded', 'expired', 'stale')),
+    created_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL
+);
 """
 
 
@@ -226,13 +238,16 @@ def create_schema(connection: sqlite3.Connection) -> None:
     old tables) is copied to <name>.v1.bak and migrated in a single transaction; the
     migration report (backup path and joined or renamed companies) goes to stderr, never to
     stdout, which carries the MCP protocol. A database already in version 2 is left as it
-    is, so this is safe to call at every opening. Any other version raises
-    sqlite3.DatabaseError.
+    is, apart from the tables version 2 gained after it first reached develop (proposal),
+    which are created when missing, so this is safe to call at every opening. Any other
+    version raises sqlite3.DatabaseError.
 
     The version is read again under the write lock (BEGIN IMMEDIATE): when two processes
     open the same v0.1.0 database at once, only the first one copies and migrates it.
     """
     if _user_version(connection) == SCHEMA_VERSION:
+        # Every statement is CREATE ... IF NOT EXISTS: a no-op on a complete database.
+        _run_schema(connection)
         return
     # Foreign keys can only be switched off outside a transaction. legacy_alter_table keeps
     # interaction pointing to the name "contact" when the old table is renamed.
@@ -324,6 +339,9 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
     """Migrate a v0.1.0 database (version 0) to the version 2 without losing data.
 
     Runs inside the caller's transaction, with foreign keys off; returns the report lines.
+    - References to missing jobs are looked for first, reading only: when there is one,
+      the migration stops naming the ids, before any copy is made (so opening a broken
+      database again and again does not pile up copies).
     - The database is copied to a free <name>.v1.bak path before anything changes.
     - Companies come from the texts of job.company and contact.company, joined by
       normalized name; the name kept is the first one seen (jobs first, then contacts, by id).
@@ -334,10 +352,7 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
       link with role 'contact' and confirmed true.
     - job_history goes to history with entity 'application', source_type 'user' and the
       original free text of source in source_ref.
-    A link or history line pointing to a missing job stops the migration, naming the ids.
     """
-    backup = _backup(connection)
-    report = [f"Migrating the database to schema version {SCHEMA_VERSION}; copy at {backup}."]
     orphan_contacts = [
         row[0]
         for row in connection.execute(
@@ -354,9 +369,11 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
     if orphan_contacts or orphan_lines:
         raise sqlite3.IntegrityError(
             "The v0.1.0 database points to missing jobs (contact ids "
-            f"{orphan_contacts}, job_history ids {orphan_lines}); nothing was migrated. "
-            f"Fix them and open it again; a copy is at {backup}."
+            f"{orphan_contacts}, job_history ids {orphan_lines}); nothing was migrated and "
+            "the database is unchanged. Fix them and open it again."
         )
+    backup = _backup(connection)
+    report = [f"Migrating the database to schema version {SCHEMA_VERSION}; copy at {backup}."]
 
     joined = {}
 

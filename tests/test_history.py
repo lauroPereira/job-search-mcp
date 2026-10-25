@@ -1,6 +1,7 @@
 from datetime import date
 
 import pytest
+from helpers import write
 
 from job_search_mcp import contacts, domain, history, jobs
 
@@ -88,7 +89,9 @@ def test_record_changes_refuses_unknown_entity_field_or_source(
 
 
 def test_update_job_with_a_known_source_type_stores_it_without_reference(connection):
-    result = jobs.update_job(connection, 3, "email", ON, status="hr_interview")
+    result = write(
+        connection, jobs.plan_update_job(connection, 3, "email", ON, status="hr_interview")
+    )
     assert result["history"][0]["source"] == "email"
     stored = lines(connection, "application")
     assert (stored[0]["source_type"], stored[0]["source_ref"]) == ("email", None)
@@ -96,7 +99,10 @@ def test_update_job_with_a_known_source_type_stores_it_without_reference(connect
 
 
 def test_log_interaction_records_the_contact_changes_in_history(connection):
-    contacts.log_interaction(connection, 5, "Primeira mensagem", ON, next_step="Aguardar")
+    write(
+        connection,
+        contacts.plan_log_interaction(connection, 5, "Primeira mensagem", ON, next_step="Aguardar"),
+    )
     stored = {line["field"]: line for line in lines(connection, "contact")}
     assert set(stored) == {"last_contact_on", "status", "next_step"}
     assert (stored["status"]["old_value"], stored["status"]["new_value"]) == (
@@ -111,8 +117,13 @@ def test_log_interaction_records_the_contact_changes_in_history(connection):
 def test_on_hold_has_no_follow_up_and_still_counts_as_active(connection, reference_date):
     from job_search_mcp import summary
 
-    jobs.update_job(connection, 1, "user", reference_date, status="on_hold")
-    contacts.log_interaction(connection, 1, "Pausou o processo", reference_date, status="on_hold")
+    write(connection, jobs.plan_update_job(connection, 1, "user", reference_date, status="on_hold"))
+    write(
+        connection,
+        contacts.plan_log_interaction(
+            connection, 1, "Pausou o processo", reference_date, status="on_hold"
+        ),
+    )
     assert jobs.get_job(connection, 1)["follow_up"] is None
     assert contacts.get_contact(connection, 1)["follow_up"] is None
     pending = summary.pending_followups(connection, reference_date)
