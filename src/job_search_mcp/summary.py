@@ -17,6 +17,12 @@ MAX_WEEKS = 52
 ACTIVE_STATUSES = tuple(
     status for status in domain.JOB_STATUSES if status not in domain.JOB_CLOSED_STATUSES
 )
+# Active applications split in the queue (not applied yet) and the ones in progress (applied
+# up to offer, plus on_hold).
+FUNNEL_QUEUE_STATUSES = ("suggested", "to_apply", "blocked")
+IN_PROGRESS_STATUSES = tuple(
+    status for status in ACTIVE_STATUSES if status not in FUNNEL_QUEUE_STATUSES
+)
 
 
 def _reference(reference_date: str | date | None) -> date | None:
@@ -123,9 +129,12 @@ def daily_summary(
 
 
 def _reached_interview(job: dict) -> bool:
-    """The application had an hr, technical or manager stage, or is in an interview status."""
-    return job["status"] in domain.JOB_INTERVIEW_STATUSES or any(
-        stage["kind"] in domain.INTERVIEW_STAGE_KINDS for stage in job["stages"]
+    """The application reached an interview: its status is an interview, offer or hired, or it
+    has an hr, technical, manager or offer stage whose result is not cancelled."""
+    return job["status"] in domain.JOB_REACHED_INTERVIEW_STATUSES or any(
+        stage["kind"] in domain.INTERVIEW_STAGE_KINDS
+        and stage["result"] != domain.CANCELLED_STAGE_RESULT
+        for stage in job["stages"]
     )
 
 
@@ -139,6 +148,9 @@ def _applications_per_week(jobs: list[dict], reference: date, weeks: int) -> lis
     """Applications counted by applied_on in each ISO week (Monday to Sunday), oldest first.
 
     The week of the reference date is the last one; weeks without applications count zero.
+    Only applications up to the reference date count, so its week may be partial:
+    `days_elapsed` is how many of its days are on or before the reference date and
+    `partial` is True while that is less than 7.
     """
     current_monday = reference - timedelta(days=reference.weekday())
     applied = [to_date(job["applied_on"]) for job in jobs if job["applied_on"]]
@@ -146,13 +158,17 @@ def _applications_per_week(jobs: list[dict], reference: date, weeks: int) -> lis
     for back in range(weeks - 1, -1, -1):
         start = current_monday - timedelta(weeks=back)
         end = start + timedelta(days=6)
+        last = min(end, reference)
         year, week, _ = start.isocalendar()
+        days_elapsed = (last - start).days + 1
         result.append(
             {
                 "week": f"{year}-W{week:02d}",
                 "start": start.isoformat(),
                 "end": end.isoformat(),
-                "applications": sum(start <= day <= end for day in applied),
+                "applications": sum(start <= day <= last for day in applied),
+                "days_elapsed": days_elapsed,
+                "partial": days_elapsed < 7,
             }
         )
     return result
@@ -164,18 +180,27 @@ def funnel_metrics(
     weeks: int = DEFAULT_WEEKS,
     settings: Settings | None = None,
 ) -> dict:
-    """Funnel metrics at the reference date, calculated from the database (nothing is written).
+    """Funnel metrics calculated from the database (nothing is written).
+
+    Only the applications per week, the follow-ups and the days to the deadline depend on the
+    reference date; the other counts are the current state of the data.
 
     - `active_by_status`: applications in each status of `active_statuses` (every status that
       is not closed, on_hold included) and `active_total`.
+    - `queue`: active applications not applied yet (FUNNEL_QUEUE_STATUSES), with `statuses`
+      and `total`.
+    - `in_progress`: active applications from applied up to offer, plus on_hold
+      (IN_PROGRESS_STATUSES), with `statuses`, `total`, `with_referral` (a confirmed
+      referrer) and `without_referral`.
     - `in_interview`: applications now in an interview status.
-    - `interview_rate`: `reached_interview` (applications with applied_on that had an hr,
-      technical or manager stage or are in an interview status) divided by `applied`
-      (applications with applied_on); `rate` is None when there is none.
-    - `applications_per_week`: the last `weeks` ISO weeks (1 to MAX_WEEKS), oldest first.
-    - `active_with_referral` / `active_without_referral`: active applications with and
-      without a confirmed referrer.
-    - `follow_ups`: how many jobs and contacts are overdue or due soon (as pending_followups).
+    - `interview_rate`: `reached_interview` (applications with applied_on whose status is an
+      interview, offer or hired, or with an hr, technical, manager or offer stage not
+      cancelled) divided by `applied` (applications with applied_on, closed included);
+      `rate` is None when there is none.
+    - `applications_per_week`: the last `weeks` ISO weeks (1 to MAX_WEEKS), oldest first,
+      counting applied_on up to the reference date (see _applications_per_week).
+    - `follow_ups`: how many jobs and contacts are overdue or due soon; pending_followups
+      lists them.
     - `deadline` and `days_to_deadline` from goals.deadline, and the `goals` of the settings;
       None when not set.
     """
@@ -191,9 +216,10 @@ def funnel_metrics(
     jobs = list_jobs(connection, settings=settings)
     contacts = list_contacts(connection, settings=settings)
     active = [job for job in jobs if job["status"] in ACTIVE_STATUSES]
+    in_progress = [job for job in active if job["status"] in IN_PROGRESS_STATUSES]
     applied = [job for job in jobs if job["applied_on"]]
     reached = sum(_reached_interview(job) for job in applied)
-    with_referral = sum(_has_confirmed_referral(job) for job in active)
+    with_referral = sum(_has_confirmed_referral(job) for job in in_progress)
     pending = {
         "jobs": _pending(jobs, reference, DEFAULT_DAYS_AHEAD),
         "contacts": _pending(contacts, reference, DEFAULT_DAYS_AHEAD),
@@ -212,6 +238,16 @@ def funnel_metrics(
             status: sum(job["status"] == status for job in active) for status in ACTIVE_STATUSES
         },
         "active_total": len(active),
+        "queue": {
+            "statuses": list(FUNNEL_QUEUE_STATUSES),
+            "total": sum(job["status"] in FUNNEL_QUEUE_STATUSES for job in active),
+        },
+        "in_progress": {
+            "statuses": list(IN_PROGRESS_STATUSES),
+            "total": len(in_progress),
+            "with_referral": with_referral,
+            "without_referral": len(in_progress) - with_referral,
+        },
         "in_interview": sum(job["status"] in domain.JOB_INTERVIEW_STATUSES for job in active),
         "interview_rate": {
             "reached_interview": reached,
@@ -219,8 +255,6 @@ def funnel_metrics(
             "rate": round(reached / len(applied), 4) if applied else None,
         },
         "applications_per_week": _applications_per_week(jobs, reference, weeks),
-        "active_with_referral": with_referral,
-        "active_without_referral": len(active) - with_referral,
         "follow_ups": {
             "days_ahead": DEFAULT_DAYS_AHEAD,
             "overdue": count(domain.OVERDUE),

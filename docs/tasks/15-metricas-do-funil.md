@@ -43,24 +43,35 @@ Data: 2026-10-25. Ambiente: Windows 11, Python do `.venv` do worktree, branch `f
 
 Comandos e resultados:
 
-- `.venv\Scripts\python.exe tools/scripts/lint_and_tests.py --strict` — 345 testes passaram, `ruff check` sem achados, "Validação estrita concluída sem falhas".
+- `.venv\Scripts\python.exe tools/scripts/lint_and_tests.py --strict` — 346 testes passaram (após as correções da revisão), `ruff check` sem achados, "Validação estrita concluída sem falhas".
 - `.venv\Scripts\ruff.exe format --check src tests` — 27 arquivos já formatados; nenhuma linha nova acima de 100 colunas.
 
 Testes novos:
 
-- `tests/test_summary.py`: métricas sobre o seed em 2026-03-16 comparadas com a contagem à mão, anotada em comentário (ativas por status, em entrevista, taxa 5/10 = 0,5, semanas W09 a W12 = 1, 2, 1, 0, indicação 1/10, follow-ups vencidos 2+2 e a vencer 3+2); oito semanas, semana de domingo e virada de ano; banco vazio com taxa nula; metas e prazo da configuração (45 dias; -2 depois do prazo); `on_hold` e etapa nova mudando as contagens; `weeks` e data inválidos; nenhuma escrita.
+- `tests/test_summary.py`: métricas sobre o seed em 2026-03-16 comparadas com a contagem à mão, anotada em comentário (ativas por status, fila 4, em andamento 7 com indicação 1 e sem 6, em entrevista 3, taxa 6/10 = 0,6, semanas W09 a W12 = 1, 2, 1, 0 com W12 parcial de 1 dia, follow-ups vencidos 2+2 e a vencer 3+2); oito semanas, semana de domingo (completa), contagem limitada à data de referência e virada de ano; etapa cancelada não conta e etapa `offer` conta; banco vazio com taxa nula; metas e prazo da configuração (45 dias; -2 depois do prazo); `on_hold` e etapa nova mudando as contagens; `weeks` e data inválidos; nenhuma escrita.
 - `tests/test_server.py`: `jobs_funnel_metrics` na lista de ferramentas, parâmetros (`reference_date`, `weeks` inteiro com padrão 4), dica de leitura; caso de uso 6 pelo cliente MCP, sem configuração e com `JOB_SEARCH_CONFIG` apontando para metas e prazo, com retrato do banco igual antes e depois; erros `invalid_date` e `invalid_input`.
 
 Definições adotadas (`summary.funnel_metrics`):
 
-- **Ativas:** todo status não encerrado (`domain.JOB_CLOSED_STATUSES`), `on_hold` incluído; a lista vai no retorno como `active_statuses`. Inclui `suggested`, `to_apply` e `blocked`.
+- **Ativas:** todo status não encerrado (`domain.JOB_CLOSED_STATUSES`), `on_hold` incluído; a lista vai no retorno como `active_statuses`, com `active_by_status` e `active_total`.
+- **Fila (`queue`):** ativas ainda não candidatadas — `suggested`, `to_apply` e `blocked` — com `statuses` e `total`.
+- **Em andamento (`in_progress`):** ativas de `applied` até `offer`, mais `on_hold`, com `statuses`, `total`, `with_referral` e `without_referral`.
 - **Em entrevista (`in_interview`):** ativas hoje em `hr_interview`, `tech_interview` ou `manager_interview`.
-- **Taxa de entrevista:** conforme o plano — candidaturas com `applied_on` que tiveram etapa `hr`, `technical` ou `manager` (qualquer resultado) ou estão em status de entrevista, divididas pelas candidaturas com `applied_on` (encerradas incluídas); arredondada a 4 casas; `null` quando não há candidaturas com `applied_on`. Uma candidatura em `offer` ou `hired` sem etapas registradas não conta (no seed, a vaga 12).
-- **Candidaturas por semana:** semanas ISO de segunda a domingo, contadas por `applied_on` (encerradas incluídas), da mais antiga para a da data de referência, com zeros; `weeks` de 1 a 52, fora disso `invalid_input`.
-- **Com e sem indicação:** ativas com ao menos um vínculo `referrer` confirmado; as demais ficam "sem".
-- **Follow-ups:** contagem de vagas e pessoas vencidas e a vencer, reaproveitando `summary._pending` com 2 dias de antecedência (o mesmo de `daily_summary`).
+- **Taxa de entrevista (decisão do Supervisor, registrada no plano):** candidaturas com `applied_on` cujo status é `hr_interview`, `tech_interview`, `manager_interview`, `offer` ou `hired`, ou que têm etapa `hr`, `technical`, `manager` ou `offer` com resultado diferente de `cancelled`, divididas pelas candidaturas com `applied_on` (encerradas incluídas); arredondada a 4 casas; `null` quando não há candidaturas com `applied_on`.
+- **Candidaturas por semana:** semanas ISO de segunda a domingo, contadas por `applied_on` até a data de referência (encerradas incluídas), da mais antiga para a da data de referência, com zeros; cada semana traz `days_elapsed` e `partial` (verdadeiro enquanto a semana da referência tem menos de 7 dias decorridos; num domingo ela está completa); `weeks` de 1 a 52, fora disso `invalid_input`.
+- **Com e sem indicação:** em andamento com ao menos um vínculo `referrer` confirmado; as demais em andamento ficam "sem".
+- **Follow-ups:** contagem de vagas e pessoas vencidas e a vencer, reaproveitando `summary._pending` com 2 dias de antecedência (o mesmo de `daily_summary`); a lista fica em `pending_followups`.
 - **Prazo e metas:** `goals.deadline`, `goals.applications_per_week` e `goals.interview_rate` da configuração local; `null` quando ausentes. A ferramenta não recebe prazo por parâmetro, como no plano.
-- As contagens não filtram por data além da semana: o retrato é o estado atual dos dados.
+- Só as semanas, os follow-ups e o prazo dependem da data de referência; as demais contagens são o estado atual dos dados (dito na descrição do parâmetro e na docstring).
+
+Achados da revisão (PR 24, parecer não apto por um achado alto), corrigidos na mesma branch:
+
+| # | Severidade | Achado | Decisão |
+|---|---|---|---|
+| 1 | Alta | A taxa de entrevista caía quando a candidatura avançava: `offer` e `hired` sem etapas não contavam. | Corrigido conforme decisão do Supervisor: conta status `hr_interview`, `tech_interview`, `manager_interview`, `offer` ou `hired`, ou etapa `hr`, `technical`, `manager` ou `offer` com resultado diferente de `cancelled`. Seed passa a 6/10 (a vaga 12, `hired`, entra). Interpretação registrada no plano. Testes com etapa cancelada e etapa `offer`. |
+| 2 | Média | Ativas misturavam a fila (ainda não candidatadas) com o andamento, e a indicação era contada sobre todas. | Corrigido: mantido `active_by_status`; acrescentados `queue` (`suggested`, `to_apply`, `blocked`) e `in_progress` (`applied` até `offer`, mais `on_hold`), com `with_referral` e `without_referral` sobre `in_progress`. Chaves documentadas na ferramenta e na função. |
+| 3 | Baixa | Semanas contavam `applied_on` posterior à data de referência e não indicavam a semana incompleta. | Corrigido: contagem até a data de referência; cada semana traz `days_elapsed` e `partial`. A descrição de `reference_date` diz que só semanas, follow-ups e prazo dependem da data. |
+| 4 | Baixa | A docstring não dizia onde ver a lista dos follow-ups. | Corrigido: indica `pending_followups`. |
 
 ## Status
 

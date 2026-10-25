@@ -259,8 +259,12 @@ def test_use_case_6_funnel_of_the_week(db_path, tmp_path, monkeypatch):
     assert result["active_total"] == 11
     assert result["active_by_status"]["applied"] == 2
     assert result["in_interview"] == 3
-    assert result["interview_rate"] == {"reached_interview": 5, "applied": 10, "rate": 0.5}
+    assert result["queue"]["total"] == 4
+    assert result["in_progress"]["total"] == 7
+    assert result["in_progress"]["with_referral"] == 1
+    assert result["interview_rate"] == {"reached_interview": 6, "applied": 10, "rate": 0.6}
     assert [week["applications"] for week in result["applications_per_week"]] == [1, 2, 1, 0]
+    assert result["applications_per_week"][-1]["partial"] is True
     assert result["follow_ups"]["overdue"] == {"jobs": 2, "contacts": 2}
     assert result["days_to_deadline"] is None
     assert result["goals"] == {"applications_per_week": None, "interview_rate": None}

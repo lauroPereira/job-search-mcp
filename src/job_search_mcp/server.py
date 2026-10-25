@@ -639,14 +639,21 @@ def daily_summary(
 def jobs_funnel_metrics(
     reference_date: Annotated[
         str | None,
-        Field(description=f"Date the metrics are calculated for. {ISO_DATE_HELP} Default: today."),
+        Field(
+            description=(
+                f"Date the metrics are calculated for. {ISO_DATE_HELP} Default: today. Only the "
+                "applications per week (counted up to this date), the follow-ups and the days "
+                "to the deadline depend on it; the other counts are the current state of the data."
+            )
+        ),
     ] = None,
     weeks: Annotated[
         int,
         Field(
             description=(
                 "How many ISO weeks (Monday to Sunday) of applications to count, the week of "
-                f"the reference date being the last. Integer from 1 to {summary_queries.MAX_WEEKS}."
+                "the reference date being the last. "
+                f"Integer from 1 to {summary_queries.MAX_WEEKS}."
             )
         ),
     ] = summary_queries.DEFAULT_WEEKS,
@@ -654,15 +661,19 @@ def jobs_funnel_metrics(
     """Funnel metrics of the job search, calculated from the data (nothing is written).
 
     Returns {"reference_date", "active_statuses" (statuses that count as active: every status
-    not closed, on_hold included), "active_by_status", "active_total", "in_interview"
-    (applications now in an interview status), "interview_rate" ({"reached_interview",
-    "applied", "rate"}: applications with applied_on that had an hr, technical or manager
-    stage or are in an interview status, divided by the applications with applied_on; rate
-    is null without applications), "applications_per_week" (week, start, end, applications;
-    oldest first, by applied_on), "active_with_referral" and "active_without_referral"
-    (confirmed referrer), "follow_ups" (how many jobs and contacts are overdue or due soon),
-    "deadline" and "days_to_deadline" (goals.deadline; null when not set) and "goals"
-    (applications_per_week and interview_rate from the local settings; null when not set)}.
+    not closed, on_hold included), "active_by_status", "active_total", "queue" (active not
+    applied yet: suggested, to_apply, blocked; with statuses and total), "in_progress" (active
+    from applied up to offer, plus on_hold; with statuses, total, with_referral and
+    without_referral, by confirmed referrer), "in_interview" (applications now in an
+    interview status), "interview_rate" ({"reached_interview", "applied", "rate"}:
+    applications with applied_on whose status is an interview, offer or hired, or with an hr,
+    technical, manager or offer stage not cancelled, divided by the applications with
+    applied_on; rate is null without applications), "applications_per_week" (week, start,
+    end, applications, days_elapsed, partial; oldest first, by applied_on up to the reference
+    date; the last week is partial until Sunday), "follow_ups" (how many jobs and contacts are
+    overdue or due soon; pending_followups lists them), "deadline" and "days_to_deadline"
+    (goals.deadline; null when not set) and "goals" (applications_per_week and interview_rate
+    from the local settings; null when not set)}.
     """
     with open_database() as connection:
         return summary_queries.funnel_metrics(
