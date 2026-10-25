@@ -108,6 +108,8 @@ Esquema versão 2. As colunas novas aparecem em **negrito**.
 
 **Taxa de entrevista:** candidaturas que chegaram a uma etapa `hr`, `technical` ou `manager`, ou a um status de entrevista, dividido pelas candidaturas com `applied_on`.
 
+Interpretação adotada na tarefa 15 (decisão do Supervisor na revisão do PR 24): entre as candidaturas com `applied_on`, conta como entrevista a que tem status `hr_interview`, `tech_interview`, `manager_interview`, `offer` ou `hired`, ou alguma etapa `hr`, `technical`, `manager` ou `offer` com resultado diferente de `cancelled`. Assim a taxa não cai quando a candidatura avança sem etapas registradas, e etapa cancelada não conta.
+
 ## Estratégia de testes
 
 Cada critério de aceitação da especificação tem um teste:

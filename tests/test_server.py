@@ -21,6 +21,7 @@ TOOL_NAMES = [
     "changes_list_pending",
     "daily_summary",
     "jobs_add_stage",
+    "jobs_funnel_metrics",
     "jobs_link_person",
     "list_contacts",
     "list_jobs",
@@ -106,7 +107,7 @@ def rows(path, query):
         connection.close()
 
 
-def test_server_lists_exactly_the_sixteen_tools(db_path):
+def test_server_lists_exactly_the_seventeen_tools(db_path):
     tools = run(lambda client: client.list_tools())
     assert sorted(tool.name for tool in tools) == TOOL_NAMES
     assert server.mcp.name == "job-search"
@@ -163,6 +164,7 @@ def test_tool_parameters_match_the_plan(db_path):
             "status",
         ],
         "jobs_link_person": ["confirmed", "contact_id", "job_id", "role", "source"],
+        "jobs_funnel_metrics": ["reference_date", "weeks"],
     }
     required = {name: sorted(tool.input_schema.get("required", [])) for name, tool in tools.items()}
     assert required == {
@@ -182,10 +184,14 @@ def test_tool_parameters_match_the_plan(db_path):
         "network_save_person": ["source"],
         "jobs_add_stage": ["date", "job_id", "kind", "source"],
         "jobs_link_person": ["contact_id", "job_id", "role", "source"],
+        "jobs_funnel_metrics": [],
     }
     days_ahead = tools["pending_followups"].input_schema["properties"]["days_ahead"]
     assert days_ahead["type"] == "integer"
     assert days_ahead["default"] == 2
+    weeks = tools["jobs_funnel_metrics"].input_schema["properties"]["weeks"]
+    assert weeks["type"] == "integer"
+    assert weeks["default"] == 4
 
 
 def test_only_the_query_tools_carry_the_read_only_hint(db_path):
@@ -210,6 +216,7 @@ def test_only_the_query_tools_carry_the_read_only_hint(db_path):
         "network_save_person": None,
         "jobs_add_stage": None,
         "jobs_link_person": None,
+        "jobs_funnel_metrics": True,
     }
 
 
@@ -236,6 +243,56 @@ def test_daily_summary_accepts_reference_date_and_deadline_as_iso_text(db_path):
     assert result["days_to_deadline"] == 11
     assert structured("daily_summary", reference_date="20/03/2026")["error"] == "invalid_date"
     assert structured("daily_summary", deadline="fim do mês")["error"] == "invalid_date"
+
+
+def test_use_case_6_funnel_of_the_week(db_path, tmp_path, monkeypatch):
+    """The agent asks for the funnel: by status, interview rate, overdue and deadline."""
+    before = snapshot(db_path)
+    result = structured("jobs_funnel_metrics")  # today (2026-03-16) and 4 weeks by default
+    connection = db.connect(db_path)
+    try:
+        expected = summary.funnel_metrics(connection, TODAY)
+    finally:
+        connection.close()
+    assert result == expected
+    # Hand counts over the seed, explained in test_summary.py.
+    assert result["active_total"] == 11
+    assert result["active_by_status"]["applied"] == 2
+    assert result["in_interview"] == 3
+    assert result["queue"]["total"] == 4
+    assert result["in_progress"]["total"] == 7
+    assert result["in_progress"]["with_referral"] == 1
+    assert result["interview_rate"] == {"reached_interview": 6, "applied": 10, "rate": 0.6}
+    assert [week["applications"] for week in result["applications_per_week"]] == [1, 2, 1, 0]
+    assert result["applications_per_week"][-1]["partial"] is True
+    assert result["follow_ups"]["overdue"] == {"jobs": 2, "contacts": 2}
+    assert result["days_to_deadline"] is None
+    assert result["goals"] == {"applications_per_week": None, "interview_rate": None}
+    assert snapshot(db_path) == before  # a read tool: nothing written
+
+    settings = tmp_path / "settings.toml"
+    settings.write_text(
+        '[goals]\ndeadline = "2026-03-31"\napplications_per_week = 5\ninterview_rate = 0.4\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JOB_SEARCH_CONFIG", str(settings))
+    with_goals = structured("jobs_funnel_metrics", reference_date="2026-03-20", weeks=2)
+    assert with_goals["reference_date"] == "2026-03-20"
+    assert with_goals["deadline"] == "2026-03-31"
+    assert with_goals["days_to_deadline"] == 11
+    assert with_goals["goals"] == {"applications_per_week": 5, "interview_rate": 0.4}
+    assert [week["week"] for week in with_goals["applications_per_week"]] == [
+        "2026-W11",
+        "2026-W12",
+    ]
+
+
+def test_jobs_funnel_metrics_rejects_invalid_date_and_weeks(db_path):
+    assert structured("jobs_funnel_metrics", reference_date="hoje")["error"] == "invalid_date"
+    for weeks in (0, 53):
+        result = structured("jobs_funnel_metrics", weeks=weeks)
+        assert result["error"] == "invalid_input"
+        assert "weeks" in result["detail"]
 
 
 def test_pending_followups_defaults_to_today_and_two_days_ahead(db_path):
