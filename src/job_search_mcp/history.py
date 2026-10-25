@@ -14,7 +14,15 @@ from job_search_mcp import domain
 # is its column, except the reference fields (REFERENCE_FIELDS): contact.company is written
 # to the column company_id.
 UPDATABLE_FIELDS = {
-    "application": ("status", "next_step", "applied_on", "last_contact_on"),
+    "application": (
+        "status",
+        "next_step",
+        "applied_on",
+        "last_contact_on",
+        "resume_track",
+        "salary_ask",
+        "contract_type",
+    ),
     "contact": (
         "status",
         "next_step",

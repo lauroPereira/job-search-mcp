@@ -123,8 +123,8 @@ def list_jobs(
     next_step, applied_on, last_contact_on, created_at, company_id, the calculated
     follow_up date (null when the status does not generate a follow-up), priority (high
     with a score of at least 7.5 or a confirmed referrer, medium with a score of at least
-    7, otherwise low), stages (id, kind, date, result, feedback; by date) and people (id,
-    name, role, confirmed).
+    7, otherwise low), stages (id, kind, date, result, feedback; by date), people (id,
+    name, role, confirmed), resume_track, salary_ask and contract_type.
     """
     with open_database() as connection:
         result = jobs.list_jobs(
@@ -194,6 +194,16 @@ def update_job(
         str | None,
         Field(description=f"Date of the last contact about it. {ISO_DATE_HELP} Not after today."),
     ] = None,
+    resume_track: Annotated[
+        str | None,
+        Field(description="Track of the resume sent: data, systems, product, ai or other."),
+    ] = None,
+    salary_ask: Annotated[
+        str | None, Field(description="Salary expectation sent, as short free text.")
+    ] = None,
+    contract_type: Annotated[
+        str | None, Field(description="Contract type sent, as short free text (such as CLT, PJ).")
+    ] = None,
 ) -> dict[str, Any]:
     """Propose updating the informed fields of a job; fields left out are not touched.
 
@@ -204,10 +214,16 @@ def update_job(
     proposal. Once confirmed, changes_confirm returns {"job": the updated job,
     "history": the history lines created}, one line for each field that really changed,
     dated the day of the proposal. Changing the status to 'applied' on a job without an
-    application date sets applied_on to that day.
+    application date sets applied_on to that day. A resume_track outside the tracks is the
+    error 'invalid_input'.
     """
     arguments = {"job_id": job_id, "source": source, "reference_date": today().isoformat()}
     arguments |= {"status": status, "next_step": next_step}
+    arguments |= {
+        "resume_track": resume_track,
+        "salary_ask": salary_ask,
+        "contract_type": contract_type,
+    }
     for field, value in (("applied_on", applied_on), ("last_contact_on", last_contact_on)):
         parsed = past_date(field, value)
         if domain.is_error(parsed):

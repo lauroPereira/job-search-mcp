@@ -124,7 +124,17 @@ def test_tool_parameters_match_the_plan(db_path):
     assert parameters == {
         "list_jobs": ["min_score", "status", "track"],
         "add_job": ["company", "next_step", "score", "source", "title", "track", "url"],
-        "update_job": ["applied_on", "job_id", "last_contact_on", "next_step", "source", "status"],
+        "update_job": [
+            "applied_on",
+            "contract_type",
+            "job_id",
+            "last_contact_on",
+            "next_step",
+            "resume_track",
+            "salary_ask",
+            "source",
+            "status",
+        ],
         "list_contacts": ["company", "status"],
         "log_interaction": ["contact_id", "date", "next_step", "status", "summary"],
         "pending_followups": ["days_ahead", "reference_date"],
@@ -392,6 +402,50 @@ def test_update_job_writes_history_dated_today(db_path):
     assert rows(db_path, "SELECT COUNT(*) FROM history") == [(3,)]
 
 
+def test_update_job_proposes_and_records_what_was_sent_with_the_application(db_path):
+    before = snapshot(db_path)
+    proposal = structured(
+        "update_job",
+        job_id=2,
+        source="conversation",
+        resume_track="data",
+        salary_ask="a combinar",
+        contract_type="CLT",
+    )["proposal"]
+    assert snapshot(db_path) == before
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in proposal["changes"]] == [
+        ("resume_track", None, "data"),
+        ("salary_ask", None, "a combinar"),
+        ("contract_type", None, "CLT"),
+    ]
+    result = structured("changes_confirm", proposal_id=proposal["id"])
+    job = result["job"]
+    assert (job["resume_track"], job["salary_ask"], job["contract_type"]) == (
+        "data",
+        "a combinar",
+        "CLT",
+    )
+    assert rows(
+        db_path,
+        "SELECT field, source_type FROM history WHERE entity = 'application' ORDER BY id",
+    ) == [
+        ("resume_track", "conversation"),
+        ("salary_ask", "conversation"),
+        ("contract_type", "conversation"),
+    ]
+    listed = structured("list_jobs", status="applied")["jobs"]
+    assert [(j["id"], j["resume_track"]) for j in listed] == [(1, None), (2, "data")]
+
+
+def test_update_job_refuses_a_resume_track_outside_the_tracks(db_path):
+    before = snapshot(db_path)
+    result = structured("update_job", job_id=2, source="user", resume_track="dados")
+    assert result["error"] == "invalid_input"
+    assert result["valid_values"] == ["data", "systems", "product", "ai", "other"]
+    assert snapshot(db_path) == before
+    assert structured("changes_list_pending") == {"proposals": []}
+
+
 def test_update_job_does_not_expose_reference_date(db_path):
     result = call("update_job", job_id=8, source="user", reference_date="2026-01-01")
     assert result.is_error is True
@@ -451,6 +505,10 @@ WRITES = (
         {"company": "Empresa Nova", "title": "Data Engineer", "url": "https://x.example/1"},
     ),
     ("update_job", {"job_id": 8, "source": "email", "status": "applied"}),
+    (
+        "update_job",
+        {"job_id": 2, "source": "conversation", "resume_track": "data", "salary_ask": "a combinar"},
+    ),
     ("log_interaction", {"contact_id": 1, "summary": "Respondeu sobre a indicação"}),
     ("network_save_company", {"name": "Empresa Nova", "source": "user", "priority": "C"}),
     (

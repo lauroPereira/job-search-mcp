@@ -391,6 +391,64 @@ def test_update_job_with_invalid_status_returns_error_and_changes_nothing(
     assert count(connection, "history") == 0
 
 
+def test_update_job_records_what_was_sent_with_the_application(connection, reference_date):
+    plan = jobs.plan_update_job(
+        connection,
+        2,
+        source="email",
+        reference_date=reference_date,
+        resume_track="data",
+        salary_ask="a combinar",
+        contract_type="PJ",
+    )
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in plan.changes] == [
+        ("resume_track", None, "data"),
+        ("salary_ask", None, "a combinar"),
+        ("contract_type", None, "PJ"),
+    ]
+    assert count(connection, "history") == 0  # planning writes nothing
+    result = write(connection, plan)
+    job = result["job"]
+    assert (job["resume_track"], job["salary_ask"], job["contract_type"]) == (
+        "data",
+        "a combinar",
+        "PJ",
+    )
+    assert [(line["field"], line["new_value"], line["source"]) for line in result["history"]] == [
+        ("resume_track", "data", "email"),
+        ("salary_ask", "a combinar", "email"),
+        ("contract_type", "PJ", "email"),
+    ]
+    assert history_rows(connection, 2) == result["history"]
+    again = write(
+        connection,
+        jobs.plan_update_job(
+            connection, 2, source="email", reference_date=reference_date, contract_type="CLT"
+        ),
+    )
+    assert again["job"]["salary_ask"] == "a combinar"  # fields left out are not touched
+    assert [(line["old_value"], line["new_value"]) for line in again["history"]] == [("PJ", "CLT")]
+
+
+@pytest.mark.parametrize("resume_track", ["dados", "none", "DATA", ""])
+def test_update_job_with_invalid_resume_track_returns_error_and_changes_nothing(
+    connection, reference_date, resume_track
+):
+    before = jobs.get_job(connection, 2)
+    result = jobs.plan_update_job(
+        connection,
+        2,
+        source="user",
+        reference_date=reference_date,
+        resume_track=resume_track,
+        salary_ask="Não deve ser gravado",
+    )
+    assert result["error"] == "invalid_input"
+    assert result["valid_values"] == list(domain.JOB_TRACKS)
+    assert jobs.get_job(connection, 2) == before
+    assert count(connection, "history") == 0
+
+
 def test_update_job_with_invalid_date_returns_error_and_changes_nothing(connection, reference_date):
     before = jobs.get_job(connection, 1)
     result = write(
@@ -521,7 +579,15 @@ def test_apply_job_changes_refuses_a_field_outside_the_allowed_list(connection):
     assert connection.total_changes == before  # failed before writing anything
     assert jobs.get_job(connection, 1) == job
     assert count(connection, "history") == 0
-    assert jobs.JOB_UPDATABLE_FIELDS == ("status", "next_step", "applied_on", "last_contact_on")
+    assert jobs.JOB_UPDATABLE_FIELDS == (
+        "status",
+        "next_step",
+        "applied_on",
+        "last_contact_on",
+        "resume_track",
+        "salary_ask",
+        "contract_type",
+    )
 
 
 def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(connection):

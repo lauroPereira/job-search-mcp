@@ -2,7 +2,8 @@
 
 A job is read together with its application (1:1) and its company, with the same keys as
 in v0.1.0: `company` is the name of the company. The keys `company_id`, `priority` (derived,
-see domain.job_priority), `stages` and `people` are additive.
+see domain.job_priority), `stages`, `people`, `resume_track`, `salary_ask` and
+`contract_type` are additive.
 """
 
 import sqlite3
@@ -16,12 +17,15 @@ INITIAL_STATUS = "suggested"
 APPLIED_STATUS = "applied"
 # The fields of a job that update_job changes: they live in its application.
 JOB_UPDATABLE_FIELDS = history.UPDATABLE_FIELDS["application"]
+# What was sent with the application, read at the end of a job (after `people`).
+APPLICATION_DETAILS = ("resume_track", "salary_ask", "contract_type")
 
 # Job, application and company joined, with the keys (and their order) of v0.1.0.
 JOB_SELECT = """
 SELECT job.id, company.name AS company, job.title, job.url, job.track, job.score,
     application.status, application.next_step, application.applied_on,
-    application.last_contact_on, job.created_at, job.company_id
+    application.last_contact_on, job.created_at, job.company_id, application.resume_track,
+    application.salary_ask, application.contract_type
 FROM job
 JOIN application ON application.job_id = job.id
 JOIN company ON company.id = job.company_id
@@ -95,6 +99,8 @@ def jobs_from_rows(
         )
         job["priority"] = domain.job_priority(job["score"], referred)
         job |= details
+        for field in APPLICATION_DETAILS:
+            job[field] = job.pop(field)
     return found
 
 
@@ -296,6 +302,9 @@ def plan_update_job(
     applied_on: str | date | None = None,
     last_contact_on: str | date | None = None,
     settings: Settings | None = None,
+    resume_track: str | None = None,
+    salary_ask: str | None = None,
+    contract_type: str | None = None,
 ) -> domain.Plan | dict:
     """Plan the update of the informed fields of a job, without writing anything.
 
@@ -307,6 +316,8 @@ def plan_update_job(
     filled with the reference date, so the job starts to have a follow-up. The plan
     depends on the version of the application; applying it returns the updated job and
     the history lines created. Errors are structured and nothing is planned.
+    `resume_track` (the track of the resume sent) must be one of domain.JOB_TRACKS;
+    `salary_ask` and `contract_type` (what was sent with the application) are free text.
     """
     origin = parse_source(source)
     if domain.is_error(origin):
@@ -319,6 +330,8 @@ def plan_update_job(
         return domain.not_found("job", job_id)
     if status is not None and status not in domain.JOB_STATUSES:
         return domain.invalid_status(status, domain.JOB_STATUSES)
+    if resume_track is not None and resume_track not in domain.JOB_TRACKS:
+        return domain.invalid_choice("resume_track", resume_track, domain.JOB_TRACKS)
     changes = {"status": status, "next_step": next_step}
     for field, value in (("applied_on", applied_on), ("last_contact_on", last_contact_on)):
         try:
@@ -329,6 +342,11 @@ def plan_update_job(
     becomes_applied = status == APPLIED_STATUS and job["status"] != APPLIED_STATUS
     if becomes_applied and not job["applied_on"] and changes["applied_on"] is None:
         changes["applied_on"] = changed_on.isoformat()
+    changes |= {
+        "resume_track": resume_track,
+        "salary_ask": salary_ask,
+        "contract_type": contract_type,
+    }
     changes = {field: value for field, value in changes.items() if value is not None}
     record_id = application_id(connection, job_id)
 
