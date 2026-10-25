@@ -1,0 +1,24 @@
+# Exemplo de configuração local do job-search-mcp (valores fictícios).
+#
+# Copie para config.toml (ignorado pelo Git) ou para outro lugar fora do repositório e
+# aponte a variável de ambiente JOB_SEARCH_CONFIG para o caminho absoluto do arquivo.
+# Sem o arquivo, valem os padrões indicados em cada chave. Todas as chaves são opcionais.
+
+[follow_up]
+# Dias depois do último contato (ou da candidatura) para cobrar retorno de uma vaga. Padrão: 7.
+job_days = 7
+# Dias depois da última interação para retomar o contato com uma pessoa. Padrão: 6.
+contact_days = 6
+
+[goals]
+# Prazo-âncora da busca (data AAAA-MM-DD). Usado pelo resumo do dia quando nenhum prazo
+# é informado. Padrão: nenhum.
+deadline = 2099-12-31
+# Meta de candidaturas por semana. Padrão: nenhuma.
+applications_per_week = 5
+# Meta de taxa de entrevistas por candidatura, de 0 a 1. Padrão: nenhuma.
+interview_rate = 0.2
+
+[proposals]
+# Horas até uma proposta de gravação não confirmada expirar. Padrão: 24.
+ttl_hours = 24

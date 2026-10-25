@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date
 
 from job_search_mcp import domain
+from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
 INITIAL_STATUS = "suggested"
@@ -12,17 +13,25 @@ APPLIED_STATUS = "applied"
 JOB_UPDATABLE_FIELDS = ("status", "next_step", "applied_on", "last_contact_on")
 
 
-def job_to_dict(row: sqlite3.Row) -> dict:
-    """Turn a job row into a plain dict, adding the calculated follow-up date (ISO or None)."""
+def job_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
+    """Turn a job row into a plain dict, adding the calculated follow-up date (ISO or None).
+
+    The follow-up days come from `settings` (None: the defaults).
+    """
     job = dict(row)
-    follow_up = domain.job_follow_up(job["applied_on"], job["last_contact_on"], job["status"])
+    days = (settings or DEFAULT_SETTINGS).job_follow_up_days
+    follow_up = domain.job_follow_up(
+        job["applied_on"], job["last_contact_on"], job["status"], days=days
+    )
     job["follow_up"] = follow_up.isoformat() if follow_up else None
     return job
 
 
-def get_job(connection: sqlite3.Connection, job_id: int) -> dict | None:
+def get_job(
+    connection: sqlite3.Connection, job_id: int, settings: Settings | None = None
+) -> dict | None:
     row = connection.execute("SELECT * FROM job WHERE id = ?", (job_id,)).fetchone()
-    return job_to_dict(row) if row else None
+    return job_to_dict(row, settings) if row else None
 
 
 def list_jobs(
@@ -30,6 +39,7 @@ def list_jobs(
     status: str | None = None,
     track: str | None = None,
     min_score: float | None = None,
+    settings: Settings | None = None,
 ) -> list[dict] | dict:
     """List jobs ordered by id, optionally filtered by status, track and minimum score."""
     if status is not None and status not in domain.JOB_STATUSES:
@@ -45,7 +55,7 @@ def list_jobs(
             parameters.append(value)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     rows = connection.execute(f"SELECT * FROM job{where} ORDER BY id", parameters)
-    return [job_to_dict(row) for row in rows]
+    return [job_to_dict(row, settings) for row in rows]
 
 
 def add_job(
@@ -56,6 +66,7 @@ def add_job(
     track: str | None = None,
     score: float | None = None,
     next_step: str | None = None,
+    settings: Settings | None = None,
 ) -> dict:
     """Register a job in the initial status, refusing a URL that is already registered.
 
@@ -76,7 +87,7 @@ def add_job(
         return domain.error(
             "duplicate_url",
             f"A job with this URL already exists (id {existing['id']}).",
-            job=job_to_dict(existing),
+            job=job_to_dict(existing, settings),
         )
     with connection:
         cursor = connection.execute(
@@ -84,7 +95,7 @@ def add_job(
             " VALUES (?, ?, ?, ?, ?, ?, ?)",
             (company.strip(), title.strip(), url, track, score, INITIAL_STATUS, next_step),
         )
-    return get_job(connection, cursor.lastrowid)
+    return get_job(connection, cursor.lastrowid, settings)
 
 
 def apply_job_changes(
@@ -134,6 +145,7 @@ def update_job(
     next_step: str | None = None,
     applied_on: str | date | None = None,
     last_contact_on: str | date | None = None,
+    settings: Settings | None = None,
 ) -> dict:
     """Update the informed fields of a job and record each change in job_history.
 
@@ -152,7 +164,7 @@ def update_job(
         changed_on = None
     if changed_on is None:
         return domain.invalid_date("reference_date", reference_date)
-    job = get_job(connection, job_id)
+    job = get_job(connection, job_id, settings)
     if job is None:
         return domain.not_found("job", job_id)
     if status is not None and status not in domain.JOB_STATUSES:
@@ -170,4 +182,4 @@ def update_job(
     changes = {field: value for field, value in changes.items() if value is not None}
     with connection:
         history = apply_job_changes(connection, job, changes, source.strip(), changed_on)
-    return {"job": get_job(connection, job_id), "history": history}
+    return {"job": get_job(connection, job_id, settings), "history": history}

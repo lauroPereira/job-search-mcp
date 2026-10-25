@@ -4,6 +4,7 @@ import sqlite3
 from datetime import date
 
 from job_search_mcp import domain
+from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.contacts import list_contacts
 from job_search_mcp.db import to_date
 from job_search_mcp.jobs import list_jobs
@@ -39,6 +40,7 @@ def pending_followups(
     connection: sqlite3.Connection,
     reference_date: str | date,
     days_ahead: int = DEFAULT_DAYS_AHEAD,
+    settings: Settings | None = None,
 ) -> dict:
     """Jobs and contacts whose follow-up is overdue or due within `days_ahead` days.
 
@@ -51,8 +53,8 @@ def pending_followups(
     return {
         "reference_date": reference.isoformat(),
         "days_ahead": days_ahead,
-        "jobs": _pending(list_jobs(connection), reference, days_ahead),
-        "contacts": _pending(list_contacts(connection), reference, days_ahead),
+        "jobs": _pending(list_jobs(connection, settings=settings), reference, days_ahead),
+        "contacts": _pending(list_contacts(connection, settings=settings), reference, days_ahead),
     }
 
 
@@ -60,6 +62,7 @@ def daily_summary(
     connection: sqlite3.Connection,
     reference_date: str | date,
     deadline: str | date | None = None,
+    settings: Settings | None = None,
 ) -> dict:
     """Summary of the day: counts, overdue and due-soon items and the application queue.
 
@@ -67,19 +70,23 @@ def daily_summary(
     `active_contacts` counts the contacts that are not closed. The application queue holds
     the jobs still to apply for (suggested and to_apply), highest score first. With a
     deadline, `days_to_deadline` is the number of days from the reference date to it
-    (negative when it has passed).
+    (negative when it has passed). Without an informed deadline, the one in the settings
+    (goals.deadline) is used, if any.
     """
     reference = _reference(reference_date)
     if reference is None:
         return domain.invalid_date("reference_date", reference_date)
+    settings = settings or DEFAULT_SETTINGS
+    if deadline is None:
+        deadline = settings.deadline
     try:
         deadline_date = to_date(deadline)
     except (ValueError, TypeError):
         return domain.invalid_date("deadline", deadline)
 
     # Jobs and contacts are read once and reused by the counts, the pending items and the queue.
-    jobs = list_jobs(connection)
-    contacts = list_contacts(connection)
+    jobs = list_jobs(connection, settings=settings)
+    contacts = list_contacts(connection, settings=settings)
     pending = {
         "jobs": _pending(jobs, reference, DEFAULT_DAYS_AHEAD),
         "contacts": _pending(contacts, reference, DEFAULT_DAYS_AHEAD),

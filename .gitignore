@@ -6,6 +6,8 @@
 *.pem
 *.p12
 *.secret
+# Configuração local com parâmetros pessoais (o exemplo é config.example.toml)
+config.toml
 
 # Configurações locais dos agentes (específicas da máquina)
 .claude/settings.local.json
