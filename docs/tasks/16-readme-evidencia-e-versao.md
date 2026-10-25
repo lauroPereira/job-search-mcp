@@ -33,7 +33,7 @@ Documentar a `v0.2.0`, registrar a evidência dos seis casos de uso e preparar a
    
    Registrar o nível de cada verificação.
 3. Busca nos arquivos versionados por dado real (e-mails, telefones, valores, nomes reais).
-4. Rascunho das notas da `v0.2.0`. Destacar a mudança incompatível: as ferramentas de escrita passam a devolver proposta.
+4. Rascunho das notas da `v0.2.0`. Destacar a mudança incompatível: as ferramentas de escrita passam a devolver proposta. Registrar também a mudança de comportamento de `log_interaction`: só candidaturas ativas ligadas à pessoa (qualquer papel) têm o último contato atualizado; vaga encerrada deixa de ser atualizada, e `job` é nulo quando a pessoa está ligada a mais de uma vaga (a lista vem em `jobs`).
 5. Preparar o pull request `develop` → `main` e parar: a promoção e a tag dependem do responsável humano.
 
 ## Critérios de conclusão

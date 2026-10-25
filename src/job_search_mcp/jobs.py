@@ -352,9 +352,11 @@ def plan_add_stage(
     """Plan the record of a dated stage of the application of a job, writing nothing.
 
     `kind` is one of domain.STAGE_KINDS and `result` one of domain.STAGE_RESULTS (default
-    pending); the stage date cannot be after `reference_date`. When `status` is informed,
-    the application moves to it (as in plan_update_job, including the application date
-    filled when it becomes applied); when the stage is more recent than the last contact
+    pending); the stage date cannot be after `reference_date`, and a stage of the same kind
+    on the same date of the same application is refused with 'duplicate_stage' (with the
+    existing stage). When `status` is informed, the application moves to it (as in
+    plan_update_job); an application that becomes applied without an application date
+    gets the stage date as its application date. When the stage is more recent than the last contact
     of the application, the last contact moves to the stage date. The stage and every
     changed field of the application get history lines, with `source` and dated
     `reference_date`. The stage has no version: the plan depends on the version of the
@@ -388,20 +390,36 @@ def plan_add_stage(
     if job is None:
         return domain.not_found("job", job_id)
     stage_on = stage_date.isoformat()
+    record_id = application_id(connection, job_id)
+    existing = connection.execute(
+        "SELECT id, kind, date, result, feedback FROM application_stage"
+        " WHERE application_id = ? AND kind = ? AND date = ?",
+        (record_id, kind, stage_on),
+    ).fetchone()
+    if existing is not None:
+        return domain.error(
+            "duplicate_stage",
+            f"Job {job_id} already has a {kind} stage on {stage_on} (id {existing['id']}).",
+            stage=dict(existing),
+        )
     newer = stage_on > (job["last_contact_on"] or "")
+    # An application that becomes applied through a stage was sent on the stage date, not
+    # on the day it is recorded (that one only dates the history lines).
+    becomes_applied = status == APPLIED_STATUS and job["status"] != APPLIED_STATUS
     update = plan_update_job(
         connection,
         job_id,
         source,
         changed_on,
         status=status,
+        applied_on=stage_on if becomes_applied and not job["applied_on"] else None,
         last_contact_on=stage_on if newer else None,
         settings=settings,
     )
     if domain.is_error(update):
         return update
     stage = {
-        "application_id": application_id(connection, job_id),
+        "application_id": record_id,
         "kind": kind,
         "date": stage_on,
         "result": result,
@@ -432,9 +450,14 @@ def plan_add_stage(
 
 
 def describe_link(name: str, contact_id: int, role: str, confirmed: bool) -> str:
-    """How a link of a person to an application appears in the preview and the history."""
+    """How a link of a person to an application appears in the preview shown to the user."""
     state = "confirmed" if confirmed else "not confirmed"
     return f"{name} (contact {contact_id}) as {role}, {state}"
+
+
+def link_value(contact_id: int, role: str, confirmed: bool) -> str:
+    """How a link is stored in the history: stable text, without the name, to be queried."""
+    return f"contact_id={contact_id};role={role};confirmed={int(confirmed)}"
 
 
 def plan_link_person(
@@ -455,7 +478,8 @@ def plan_link_person(
     'duplicate_link' (with the existing link), except when that link is not confirmed yet
     and `confirmed` is true: then the plan confirms it. A link has no columns of its own
     to diff, so its history is a single line: entity application_person, the application
-    as the record, field 'link' and the link described (describe_link) before and after.
+    as the record, field 'link' and the link before and after as link_value
+    (contact_id=N;role=R;confirmed=0|1). The preview shows it with the name (describe_link).
     The plan depends on the versions of the application and of the person; applying it
     returns {"link": {job_id, contact_id, name, role, confirmed}, "job": the job}.
     """
@@ -493,6 +517,15 @@ def plan_link_person(
     )
     new_value = describe_link(contact["name"], contact_id, role, new_confirmed)
     changes = [history.change("application_person", record_id, "link", old_value, new_value)]
+    lines = [
+        history.change(
+            "application_person",
+            record_id,
+            "link",
+            None if existing is None else link_value(contact_id, role, False),
+            link_value(contact_id, role, new_confirmed),
+        )
+    ]
 
     def apply() -> dict:
         if existing is None:
@@ -507,7 +540,7 @@ def plan_link_person(
                 " WHERE application_id = ? AND contact_id = ? AND role = ?",
                 (record_id, contact_id, role),
             )
-        history.record_lines(connection, changes, record_id, changed_on, *origin)
+        history.record_lines(connection, lines, record_id, changed_on, *origin)
         return {
             "link": {**link, "confirmed": new_confirmed},
             "job": get_job(connection, job_id, settings),

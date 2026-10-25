@@ -28,8 +28,9 @@ mcp = FastMCP(
         "summary. Every tool returns an object; a business error is an object with the keys "
         "'error' (a stable code) and 'detail' (a message to relay to the user). Writes take "
         "two steps: add_job, update_job, log_interaction, network_save_company, "
-        "network_save_person, jobs_add_stage and jobs_link_person change nothing and return a proposal with the changes (each "
-        "field with its current and proposed value). Show the changes to the user and call "
+        "network_save_person, jobs_add_stage and jobs_link_person change nothing and "
+        "return a proposal with the changes (each field with its current and proposed "
+        "value). Show the changes to the user and call "
         "changes_confirm with the proposal id only after the user approves; otherwise call "
         "changes_discard. Proposals expire, and one whose records changed in the meantime is "
         "refused as stale: propose again."
@@ -264,9 +265,12 @@ def log_interaction(
     with the id (or changes_discard). Validation errors come back at once, without a
     proposal. Once confirmed, changes_confirm returns {"contact": the updated
     contact, "follow_up": the new follow-up date, "job": the linked job when the contact is
-    linked to exactly one, otherwise null, "jobs": every linked job}. The last contact date
-    of every active job the contact is linked to (any role) is updated too. A contact in 'to_contact' logged without a
-    status moves to 'awaiting_reply'.
+    linked to exactly one, otherwise null, "jobs": every linked job}. Here a linked job is
+    one the contact is linked to in any role (see jobs_link_person), while the job_id of
+    the contact (list_contacts) only follows the role 'contact'. The last contact date of
+    every active linked job is updated too; closed jobs (hired, rejected, withdrawn,
+    closed) are left as they are. A contact in 'to_contact' logged without a status moves
+    to 'awaiting_reply'.
     """
     interaction_date = past_date("date", date) if date is not None else today()
     if domain.is_error(interaction_date):
@@ -458,9 +462,11 @@ def jobs_add_stage(
     each change has entity, record_id (null for a record to be created), field, old_value
     and new_value. Show the changes to the user and, after approval, call changes_confirm
     with the id (or changes_discard). Validation errors come back at once, without a
-    proposal. The proposal holds the stage and, when informed, the new status of the
+    proposal. A stage of the same kind on the same date is the error 'duplicate_stage'
+    (with the existing stage in 'stage'). The proposal holds the stage and, when informed, the new status of the
     application; when the stage is more recent than the last contact of the job, the last
-    contact moves to the stage date. Once confirmed, changes_confirm returns {"stage",
+    contact moves to the stage date; a job that becomes 'applied' without an application
+    date gets the stage date. Once confirmed, changes_confirm returns {"stage",
     "job": the updated job, "history": the history lines of the job}.
     """
     stage_date = past_date("date", date)

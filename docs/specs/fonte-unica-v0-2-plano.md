@@ -84,6 +84,7 @@ Esquema versão 2. As colunas novas aparecem em **negrito**.
 |---|---|
 | `list_jobs`, `list_contacts`, `pending_followups`, `daily_summary` | **Compatível.** Mesmos parâmetros e chaves. Novas chaves aditivas: `company_id`, `priority`, `stages` na vaga; `company_id`, `role_title` na pessoa. |
 | `add_job`, `update_job`, `log_interaction` | **Incompatível.** Devolvem `{"proposal": {...}}` em vez do resultado; o resultado vem de `changes_confirm`. Os parâmetros continuam; `add_job` ganha `source` opcional (padrão `user`). `update_job` ganha `resume_track`, `salary_ask` e `contract_type`, opcionais. `source` passa a aceitar os tipos de origem. Texto livre continua aceito, como `user`, com o texto em `source_ref`. |
+| `log_interaction` (resultado confirmado) | **Mudança de comportamento.** Atualiza `last_contact_on` de todas as candidaturas **ativas** ligadas à pessoa, em qualquer papel; candidatura encerrada (`hired`, `rejected`, `withdrawn`, `closed`) deixa de ser atualizada, o que a `v0.1.0` fazia com a vaga vinculada. `job` continua (a vaga quando a pessoa está ligada a exatamente uma, em qualquer papel; senão nulo) e `jobs` é aditiva. `contact.job_id` segue só o papel `contact`. |
 
 ### Ferramentas novas
 

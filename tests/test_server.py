@@ -588,10 +588,24 @@ def test_jobs_link_person_refuses_a_repeated_link_and_confirms_an_existing_one(d
     assert structured("jobs_link_person", **link, confirmed=True)["error"] == "duplicate_link"
     assert rows(
         db_path,
-        "SELECT entity, record_id, field, old_value IS NULL, source_type FROM history",
+        "SELECT entity, record_id, field, old_value, new_value, source_type FROM history",
     ) == [
-        ("application_person", 3, "link", 1, "conversation"),
-        ("application_person", 3, "link", 0, "conversation"),
+        (
+            "application_person",
+            3,
+            "link",
+            None,
+            "contact_id=7;role=referrer;confirmed=0",
+            "conversation",
+        ),
+        (
+            "application_person",
+            3,
+            "link",
+            "contact_id=7;role=referrer;confirmed=0",
+            "contact_id=7;role=referrer;confirmed=1",
+            "conversation",
+        ),
     ]
 
 
@@ -609,6 +623,18 @@ def test_log_interaction_updates_every_active_job_of_the_person(db_path):
     single = confirmed("log_interaction", contact_id=2, summary="Combinou horários")
     assert single["job"]["id"] == 2
     assert [job["id"] for job in single["jobs"]] == [2]
+
+
+def test_two_equal_stage_proposals_apply_only_once(db_path):
+    stage = {"job_id": 4, "kind": "hr", "date": "2026-03-14", "source": "user"}
+    first = structured("jobs_add_stage", **stage)["proposal"]
+    second = structured("jobs_add_stage", **stage)["proposal"]
+    assert "error" not in structured("changes_confirm", proposal_id=first["id"])
+    assert structured("changes_confirm", proposal_id=second["id"])["error"] == "stale_proposal"
+    duplicate = structured("jobs_add_stage", **stage)
+    assert duplicate["error"] == "duplicate_stage"
+    assert duplicate["stage"]["date"] == "2026-03-14"
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage") == [(1,)]
 
 
 def test_stage_proposal_is_stale_when_the_application_changes(db_path):

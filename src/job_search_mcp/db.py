@@ -136,6 +136,9 @@ CREATE TABLE IF NOT EXISTS history (
 );
 
 CREATE INDEX IF NOT EXISTS history_record ON history (entity, record_id);
+CREATE INDEX IF NOT EXISTS application_stage_application
+    ON application_stage (application_id);
+CREATE INDEX IF NOT EXISTS application_person_contact ON application_person (contact_id);
 
 CREATE TABLE IF NOT EXISTS proposal (
     id TEXT PRIMARY KEY,

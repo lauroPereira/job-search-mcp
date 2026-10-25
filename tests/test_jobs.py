@@ -561,6 +561,43 @@ def test_add_stage_with_status_applied_fills_the_application_date(connection):
     ]  # fmt: skip
 
 
+def test_late_stage_that_applies_uses_the_stage_date_as_the_application_date(connection):
+    """A screening of 2026-03-10 recorded on 2026-03-16 moves job 9 to applied."""
+    plan = jobs.plan_add_stage(
+        connection, 9, "screening", "2026-03-10", status="applied", source="user",
+        reference_date=ADDED_ON,
+    )  # fmt: skip
+    result = write(connection, plan)
+    assert result["job"]["applied_on"] == "2026-03-10"
+    assert result["job"]["last_contact_on"] == "2026-03-10"
+    assert {(line["field"], line["new_value"], line["date"]) for line in result["history"]} == {
+        ("status", "applied", "2026-03-16"),
+        ("applied_on", "2026-03-10", "2026-03-16"),
+        ("last_contact_on", "2026-03-10", "2026-03-16"),
+    }
+
+
+def test_stage_that_applies_keeps_a_stored_application_date(connection):
+    connection.execute("UPDATE application SET applied_on = '2026-03-01' WHERE job_id = 9")
+    plan = jobs.plan_add_stage(
+        connection, 9, "screening", "2026-03-10", status="applied", source="user",
+        reference_date=ADDED_ON,
+    )  # fmt: skip
+    assert write(connection, plan)["job"]["applied_on"] == "2026-03-01"
+
+
+def test_add_stage_refuses_the_same_kind_on_the_same_date(connection):
+    stage = {"source": "user", "reference_date": ADDED_ON}
+    write(connection, jobs.plan_add_stage(connection, 5, "test", "2026-03-01", **stage))
+    before = connection.total_changes
+    duplicate = jobs.plan_add_stage(connection, 5, "test", "2026-03-01", **stage)
+    assert duplicate["error"] == "duplicate_stage"
+    assert duplicate["stage"]["kind"] == "test"
+    assert connection.total_changes == before
+    other_day = jobs.plan_add_stage(connection, 5, "test", "2026-03-02", **stage)
+    assert not domain.is_error(other_day)
+
+
 @pytest.mark.parametrize(
     ("arguments", "code"),
     [
