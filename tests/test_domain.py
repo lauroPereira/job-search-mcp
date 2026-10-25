@@ -157,3 +157,30 @@ def test_domain_modules_do_not_read_the_current_date():
             assert call not in text, f"{path.name} reads the current date with {call}"
         checked.append(path.name)
     assert {"domain.py", "jobs.py"} <= set(checked)
+
+
+@pytest.mark.parametrize(
+    ("score", "confirmed_referral", "priority"),
+    [
+        (7.5, False, "high"),
+        (9.0, False, "high"),
+        (7.4, False, "medium"),
+        (7, False, "medium"),
+        (6.9, False, "low"),
+        (None, False, "low"),
+        (3.0, True, "high"),
+        (None, True, "high"),
+    ],
+)
+def test_job_priority_comes_from_the_score_and_a_confirmed_referral(
+    score, confirmed_referral, priority
+):
+    assert domain.job_priority(score, confirmed_referral) == priority
+
+
+def test_stage_and_role_lists_match_the_plan():
+    assert domain.STAGE_KINDS == (
+        "screening", "test", "culture_fit", "hr", "technical", "manager", "offer"
+    )  # fmt: skip
+    assert domain.STAGE_RESULTS == ("pending", "passed", "failed", "cancelled")
+    assert domain.PERSON_ROLES == ("referrer", "recruiter", "hiring_manager", "contact")

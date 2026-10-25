@@ -27,8 +27,8 @@ mcp = FastMCP(
         "Tools to manage a job search: jobs, networking contacts, follow-ups and a daily "
         "summary. Every tool returns an object; a business error is an object with the keys "
         "'error' (a stable code) and 'detail' (a message to relay to the user). Writes take "
-        "two steps: add_job, update_job, log_interaction, network_save_company and "
-        "network_save_person change nothing and return a proposal with the changes (each "
+        "two steps: add_job, update_job, log_interaction, network_save_company, "
+        "network_save_person, jobs_add_stage and jobs_link_person change nothing and return a proposal with the changes (each "
         "field with its current and proposed value). Show the changes to the user and call "
         "changes_confirm with the proposal id only after the user approves; otherwise call "
         "changes_discard. Proposals expire, and one whose records changed in the meantime is "
@@ -40,6 +40,9 @@ JOB_STATUS_HELP = f"One of: {', '.join(domain.JOB_STATUSES)}."
 CONTACT_STATUS_HELP = f"One of: {', '.join(domain.CONTACT_STATUSES)}."
 PRIORITY_HELP = f"One of: {', '.join(domain.COMPANY_PRIORITIES)}."
 ISO_DATE_HELP = "ISO 8601 date (YYYY-MM-DD)."
+STAGE_KIND_HELP = f"One of: {', '.join(domain.STAGE_KINDS)}."
+STAGE_RESULT_HELP = f"One of: {', '.join(domain.STAGE_RESULTS)}."
+ROLE_HELP = f"One of: {', '.join(domain.PERSON_ROLES)}."
 READ_ONLY = {"readOnlyHint": True}
 SOURCE_HELP = (
     f"Where the information came from, written in the history: one of "
@@ -114,8 +117,11 @@ def list_jobs(
     """List the registered jobs, ordered by id, optionally filtered.
 
     Returns {"jobs": [...]}. Each job has id, company, title, url, track, score, status,
-    next_step, applied_on, last_contact_on, created_at, company_id and the calculated
-    follow_up date (null when the status does not generate a follow-up).
+    next_step, applied_on, last_contact_on, created_at, company_id, the calculated
+    follow_up date (null when the status does not generate a follow-up), priority (high
+    with a score of at least 7.5 or a confirmed referrer, medium with a score of at least
+    7, otherwise low), stages (id, kind, date, result, feedback; by date) and people (id,
+    name, role, confirmed).
     """
     with open_database() as connection:
         result = jobs.list_jobs(
@@ -257,8 +263,9 @@ def log_interaction(
     and new_value. Show the changes to the user and, after approval, call changes_confirm
     with the id (or changes_discard). Validation errors come back at once, without a
     proposal. Once confirmed, changes_confirm returns {"contact": the updated
-    contact, "follow_up": the new follow-up date, "job": the linked job or null}. The last
-    contact date of a linked job is updated too. A contact in 'to_contact' logged without a
+    contact, "follow_up": the new follow-up date, "job": the linked job when the contact is
+    linked to exactly one, otherwise null, "jobs": every linked job}. The last contact date
+    of every active job the contact is linked to (any role) is updated too. A contact in 'to_contact' logged without a
     status moves to 'awaiting_reply'.
     """
     interaction_date = past_date("date", date) if date is not None else today()
@@ -432,6 +439,89 @@ def network_save_person(
 
 
 @mcp.tool
+def jobs_add_stage(
+    job_id: Annotated[int, Field(description="Id of the job (see list_jobs).")],
+    kind: Annotated[str, Field(description=f"Kind of stage. {STAGE_KIND_HELP}")],
+    date: Annotated[str, Field(description=f"Date of the stage. {ISO_DATE_HELP} Not after today.")],
+    source: Annotated[str, Field(description=SOURCE_HELP)],
+    result: Annotated[
+        str | None, Field(description=f"Result of the stage. {STAGE_RESULT_HELP} Default: pending.")
+    ] = None,
+    feedback: Annotated[str | None, Field(description="Feedback received, if any.")] = None,
+    status: Annotated[
+        str | None, Field(description=f"New status of the application. {JOB_STATUS_HELP}")
+    ] = None,
+) -> dict[str, Any]:
+    """Propose recording a dated stage of a job application (interview, test, offer...).
+
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. The proposal holds the stage and, when informed, the new status of the
+    application; when the stage is more recent than the last contact of the job, the last
+    contact moves to the stage date. Once confirmed, changes_confirm returns {"stage",
+    "job": the updated job, "history": the history lines of the job}.
+    """
+    stage_date = past_date("date", date)
+    if domain.is_error(stage_date):
+        return stage_date
+    return propose(
+        "jobs_add_stage",
+        {
+            "job_id": job_id,
+            "kind": kind,
+            "date": stage_date.isoformat(),
+            "result": result,
+            "feedback": feedback,
+            "status": status,
+            "source": source,
+            "reference_date": today().isoformat(),
+        },
+    )
+
+
+@mcp.tool
+def jobs_link_person(
+    job_id: Annotated[int, Field(description="Id of the job (see list_jobs).")],
+    contact_id: Annotated[int, Field(description="Id of the person (see list_contacts).")],
+    role: Annotated[str, Field(description=f"Role of the person in the application. {ROLE_HELP}")],
+    source: Annotated[str, Field(description=SOURCE_HELP)],
+    confirmed: Annotated[
+        bool | None,
+        Field(
+            description=(
+                "Whether the link is confirmed (for a referrer: the referral was really made). "
+                "A new link defaults to false; true on an existing unconfirmed link confirms it."
+            )
+        ),
+    ] = None,
+) -> dict[str, Any]:
+    """Propose linking a person to a job application with a role, or confirming a link.
+
+    Changes nothing: returns {"proposal": {"id", "tool", "changes", "expires_at"}};
+    each change has entity, record_id (null for a record to be created), field, old_value
+    and new_value. Show the changes to the user and, after approval, call changes_confirm
+    with the id (or changes_discard). Validation errors come back at once, without a
+    proposal. The same person with the same role is the error 'duplicate_link' (with the
+    existing link in 'link'), unless the link is not confirmed yet and confirmed is true.
+    A confirmed referrer makes the job a high priority. Once confirmed, changes_confirm
+    returns {"link": {job_id, contact_id, name, role, confirmed}, "job": the job}.
+    """
+    return propose(
+        "jobs_link_person",
+        {
+            "job_id": job_id,
+            "contact_id": contact_id,
+            "role": role,
+            "confirmed": confirmed,
+            "source": source,
+            "reference_date": today().isoformat(),
+        },
+    )
+
+
+@mcp.tool
 def changes_confirm(
     proposal_id: Annotated[
         str, Field(description="Id of the proposal the user approved (from a write tool).")
@@ -440,8 +530,9 @@ def changes_confirm(
     """Apply a proposal the user approved, exactly as it was shown.
 
     Returns what the proposing tool returns once applied (add_job: the created job;
-    update_job: {"job", "history"}; log_interaction: {"contact", "follow_up", "job"};
-    network_save_company: {"company"}; network_save_person: {"contact"}).
+    update_job: {"job", "history"}; log_interaction: {"contact", "follow_up", "job",
+    "jobs"}; network_save_company: {"company"}; network_save_person: {"contact"};
+    jobs_add_stage: {"stage", "job", "history"}; jobs_link_person: {"link", "job"}).
     Errors: 'stale_proposal' when the records changed since the proposal (nothing is
     written: propose again), 'expired_proposal' when it is past its expiry, and
     'not_found' for an unknown id or a proposal already applied or discarded.

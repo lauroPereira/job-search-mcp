@@ -136,11 +136,12 @@ def test_on_hold_has_no_follow_up_and_still_counts_as_active(connection, referen
     assert [c["id"] for c in contacts.list_contacts(connection, status="on_hold")] == [1]
 
 
-def test_reads_keep_the_v1_keys_and_add_company_id_and_role_title(connection):
+def test_reads_keep_the_v1_keys_and_add_the_new_ones(connection):
     job = jobs.get_job(connection, 1)
     assert list(job) == [
         "id", "company", "title", "url", "track", "score", "status", "next_step",
-        "applied_on", "last_contact_on", "created_at", "company_id", "follow_up",
+        "applied_on", "last_contact_on", "created_at", "company_id", "follow_up", "priority",
+        "stages", "people",
     ]  # fmt: skip
     contact = contacts.get_contact(connection, 1)
     assert list(contact) == [

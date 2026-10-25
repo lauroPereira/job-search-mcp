@@ -1,5 +1,5 @@
-"""Contact operations: list contacts, log interactions (keeping the linked job in step) and
-plan the creation or change of a person.
+"""Contact operations: list contacts, log interactions (keeping the linked applications in
+step) and plan the creation or change of a person.
 
 A contact is read with its company and keeps the keys of v0.1.0: `company` is the name of
 the company and `job_id` the job of the first application the person is linked to with the
@@ -81,6 +81,17 @@ def list_contacts(
     return [contact_to_dict(row, settings) for row in rows]
 
 
+def linked_job_ids(connection: sqlite3.Connection, contact_id: int) -> list[int]:
+    """Ids of the jobs whose application the person is linked to, in any role, by job id."""
+    rows = connection.execute(
+        "SELECT DISTINCT application.job_id FROM application_person"
+        " JOIN application ON application.id = application_person.application_id"
+        " WHERE application_person.contact_id = ? ORDER BY application.job_id",
+        (contact_id,),
+    )
+    return [row[0] for row in rows]
+
+
 def plan_log_interaction(
     connection: sqlite3.Connection,
     contact_id: int,
@@ -95,12 +106,14 @@ def plan_log_interaction(
     The plan adds the interaction and updates the last contact date of the contact and,
     when informed, its status and next step. A contact in to_contact logged without a
     status moves to awaiting_reply, so it starts to have a follow-up; an informed status
-    always prevails. If the contact is linked to a job, the last contact date of the job
-    is updated too. Every field that changes, of the contact or of the job, gets a history
-    line. A last contact date never moves backwards: logging an older interaction keeps
-    the more recent date. The plan depends on the versions of the contact and of the
-    linked application; applying it returns the updated contact, its new follow-up and
-    the linked job (None when there is none). Errors are structured and nothing is planned.
+    always prevails. The last contact date of every active application (status not
+    closed) the person is linked to, in any role, is updated too. Every field that
+    changes, of the contact or of an application, gets a history line. A last contact date
+    never moves backwards: logging an older interaction keeps the more recent date. The
+    plan depends on the versions of the contact and of each active linked application;
+    applying it returns the updated contact, its new follow-up, `job` (the linked job when
+    the person is linked to exactly one, otherwise None) and `jobs` (every linked job, by
+    id). Errors are structured and nothing is planned.
     """
     if not summary or not summary.strip():
         return domain.error("invalid_input", "Field 'summary' is required.")
@@ -131,16 +144,21 @@ def plan_log_interaction(
     base_versions = {
         f"contact:{contact_id}": history.read_version(connection, "contact", contact_id)
     }
-    job = jobs.get_job(connection, contact["job_id"], settings) if contact["job_id"] else None
-    job_changes = {}
-    if job:
-        application_id = jobs.application_id(connection, job["id"])
+    job_ids = linked_job_ids(connection, contact_id)
+    to_update = []
+    for job_id in job_ids:
+        job = jobs.get_job(connection, job_id, settings)
+        if job["status"] in domain.JOB_CLOSED_STATUSES:
+            continue
+        application_id = jobs.application_id(connection, job_id)
         base_versions[f"application:{application_id}"] = history.read_version(
             connection, "application", application_id
         )
         if interaction_on > (job["last_contact_on"] or ""):
-            job_changes = {"last_contact_on": interaction_on}
-            changes += history.diff("application", application_id, job, job_changes)
+            to_update.append(job)
+            changes += history.diff(
+                "application", application_id, job, {"last_contact_on": interaction_on}
+            )
 
     def apply() -> dict:
         connection.execute(
@@ -157,20 +175,22 @@ def plan_log_interaction(
             INTERACTION_SOURCE_TYPE,
             INTERACTION_SOURCE,
         )
-        if job_changes:
+        for job in to_update:
             jobs.apply_job_changes(
                 connection,
                 job,
-                job_changes,
+                {"last_contact_on": interaction_on},
                 INTERACTION_SOURCE_TYPE,
                 INTERACTION_SOURCE,
                 interaction_date,
             )
         updated = get_contact(connection, contact_id, settings)
+        linked = [jobs.get_job(connection, job_id, settings) for job_id in job_ids]
         return {
             "contact": updated,
             "follow_up": updated["follow_up"],
-            "job": jobs.get_job(connection, job["id"], settings) if job else None,
+            "job": linked[0] if len(linked) == 1 else None,
+            "jobs": linked,
         }
 
     return domain.Plan(changes=changes, base_versions=base_versions, apply=apply)

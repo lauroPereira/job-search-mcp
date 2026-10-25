@@ -57,6 +57,23 @@ JOB_TRACKS = ("data", "systems", "product", "ai", "other")
 SCORE_MIN = 0
 SCORE_MAX = 10
 
+# Stages of an application and their results; a stage without result is still pending.
+STAGE_KINDS = ("screening", "test", "culture_fit", "hr", "technical", "manager", "offer")
+STAGE_RESULTS = ("pending", "passed", "failed", "cancelled")
+DEFAULT_STAGE_RESULT = "pending"
+
+# Roles of a person in an application; a confirmed referrer makes the job a high priority.
+PERSON_ROLES = ("referrer", "recruiter", "hiring_manager", "contact")
+REFERRER_ROLE = "referrer"
+
+# Derived job priority (never stored): high with a score of at least HIGH_PRIORITY_SCORE or
+# a confirmed referral, medium with a score of at least MEDIUM_PRIORITY_SCORE, low otherwise.
+HIGH_PRIORITY = "high"
+MEDIUM_PRIORITY = "medium"
+LOW_PRIORITY = "low"
+HIGH_PRIORITY_SCORE = 7.5
+MEDIUM_PRIORITY_SCORE = 7
+
 # Default follow-up days; the local settings (config.py) may change them.
 JOB_FOLLOW_UP_DAYS = 7
 CONTACT_FOLLOW_UP_DAYS = 6
@@ -86,7 +103,7 @@ def error(code: str, detail: str, **extra) -> dict:
     """Build the structured business error every operation returns instead of raising.
 
     `error` is a stable code (invalid_status, duplicate_url, not_found, invalid_date,
-    invalid_input, stale_proposal, expired_proposal, duplicate_company) and `detail` a
+    invalid_input, stale_proposal, expired_proposal, duplicate_company, duplicate_link) and `detail` a
     message the agent can relay. Extra keys carry context, such as the valid statuses or
     the existing job.
     """
@@ -135,6 +152,24 @@ def invalid_score(score) -> dict:
         "invalid_input",
         f"Invalid score '{score}'. Use a number from {SCORE_MIN} to {SCORE_MAX}.",
     )
+
+
+def invalid_choice(field: str, value, valid: tuple[str, ...]) -> dict:
+    """Error 'invalid_input' for a value outside a closed list, with the valid ones."""
+    return error(
+        "invalid_input",
+        f"Invalid {field} '{value}'. Valid values: {', '.join(valid)}.",
+        valid_values=list(valid),
+    )
+
+
+def job_priority(score: float | None, confirmed_referral: bool) -> str:
+    """Derived priority of a job: high, medium or low (see HIGH_PRIORITY_SCORE)."""
+    if confirmed_referral or (score is not None and score >= HIGH_PRIORITY_SCORE):
+        return HIGH_PRIORITY
+    if score is not None and score >= MEDIUM_PRIORITY_SCORE:
+        return MEDIUM_PRIORITY
+    return LOW_PRIORITY
 
 
 def optional_text(value: str | None) -> str | None:

@@ -501,3 +501,128 @@ def test_apply_job_changes_refuses_a_field_outside_the_allowed_list(connection):
     assert jobs.get_job(connection, 1) == job
     assert count(connection, "history") == 0
     assert jobs.JOB_UPDATABLE_FIELDS == ("status", "next_step", "applied_on", "last_contact_on")
+
+
+def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(connection):
+    plan = jobs.plan_add_stage(
+        connection, 3, "screening", "2026-03-12", source="email", reference_date=ADDED_ON
+    )
+    assert plan.base_versions == {"application:3": 1}
+    result = write(connection, plan)
+    assert result["stage"] == {
+        "id": 1,
+        "kind": "screening",
+        "date": "2026-03-12",
+        "result": "pending",
+        "feedback": None,
+    }
+    assert result["job"]["status"] == "in_review"  # untouched
+    assert result["job"]["last_contact_on"] == "2026-03-12"
+    assert result["job"]["stages"] == [result["stage"]]
+    assert [line["field"] for line in result["history"]] == ["last_contact_on"]
+    stage_lines = connection.execute(
+        "SELECT record_id, field, new_value, date, source_type FROM history"
+        " WHERE entity = 'application_stage' ORDER BY id"
+    ).fetchall()
+    assert [tuple(row) for row in stage_lines] == [
+        (1, "application_id", "3", "2026-03-16", "email"),
+        (1, "kind", "screening", "2026-03-16", "email"),
+        (1, "date", "2026-03-12", "2026-03-16", "email"),
+        (1, "result", "pending", "2026-03-16", "email"),
+    ]
+
+
+def test_add_older_stage_keeps_the_last_contact_and_stages_come_by_date(connection):
+    for kind, on in (("technical", "2026-03-03"), ("test", "2026-02-25"), ("hr", "2026-03-03")):
+        plan = jobs.plan_add_stage(
+            connection, 5, kind, on, result="passed", source="user", reference_date=ADDED_ON
+        )
+        result = write(connection, plan)
+        assert result["history"] == []
+    job = jobs.get_job(connection, 5)
+    assert job["last_contact_on"] == "2026-03-04"
+    assert [(stage["kind"], stage["date"]) for stage in job["stages"]] == [
+        ("test", "2026-02-25"),
+        ("technical", "2026-03-03"),
+        ("hr", "2026-03-03"),
+    ]
+
+
+def test_add_stage_with_status_applied_fills_the_application_date(connection):
+    plan = jobs.plan_add_stage(
+        connection, 8, "screening", ADDED_ON, status="applied", source="user",
+        reference_date=ADDED_ON,
+    )  # fmt: skip
+    result = write(connection, plan)
+    assert result["job"]["status"] == "applied"
+    assert result["job"]["applied_on"] == "2026-03-16"
+    assert [line["field"] for line in result["history"]] == [
+        "status", "applied_on", "last_contact_on"
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("arguments", "code"),
+    [
+        ({"kind": "lunch"}, "invalid_input"),
+        ({"result": "ok"}, "invalid_input"),
+        ({"date": "2026-03-17"}, "invalid_date"),
+        ({"date": "17/03/2026"}, "invalid_date"),
+        ({"status": "hired!"}, "invalid_status"),
+        ({"job_id": 99}, "not_found"),
+        ({"source": " "}, "invalid_input"),
+    ],
+)
+def test_add_stage_validation_errors_change_nothing(connection, arguments, code):
+    stage = {"job_id": 4, "kind": "hr", "date": "2026-03-16", "source": "user"} | arguments
+    before = connection.total_changes
+    result = jobs.plan_add_stage(connection, **stage, reference_date=ADDED_ON)
+    assert result["error"] == code
+    assert connection.total_changes == before
+
+
+def test_priority_counts_only_a_confirmed_referrer(connection):
+    assert jobs.get_job(connection, 4)["priority"] == "low"  # score 6.5
+    assert jobs.get_job(connection, 3)["priority"] == "medium"  # score 7.0
+    assert jobs.get_job(connection, 2)["priority"] == "high"  # score 7.5
+    for role, confirmed in (("recruiter", True), ("referrer", False)):
+        write(
+            connection,
+            jobs.plan_link_person(
+                connection, 4, 2, role, confirmed, source="user", reference_date=ADDED_ON
+            ),
+        )
+        assert jobs.get_job(connection, 4)["priority"] == "low"
+    result = write(
+        connection,
+        jobs.plan_link_person(
+            connection, 4, 2, "referrer", True, source="user", reference_date=ADDED_ON
+        ),
+    )
+    assert result["job"]["priority"] == "high"
+    assert result["job"]["people"] == [
+        {"id": 2, "name": "Bruno Modelo", "role": "recruiter", "confirmed": True},
+        {"id": 2, "name": "Bruno Modelo", "role": "referrer", "confirmed": True},
+    ]
+
+
+def test_link_person_refuses_a_repeated_link_and_writes_nothing(connection):
+    before = connection.total_changes
+    repeated = jobs.plan_link_person(
+        connection, 1, 1, "contact", True, source="user", reference_date=ADDED_ON
+    )
+    assert repeated["error"] == "duplicate_link"
+    assert repeated["link"] == {
+        "job_id": 1, "contact_id": 1, "name": "Ana Exemplo", "role": "contact", "confirmed": True
+    }  # fmt: skip
+    for arguments, code in (
+        ({"role": "friend"}, "invalid_input"),
+        ({"confirmed": "yes"}, "invalid_input"),
+        ({"job_id": 99}, "not_found"),
+        ({"contact_id": 99}, "not_found"),
+        ({"source": ""}, "invalid_input"),
+    ):
+        link = {"job_id": 1, "contact_id": 2, "role": "referrer", "source": "user"} | arguments
+        result = jobs.plan_link_person(connection, **link, reference_date=ADDED_ON)
+        assert result["error"] == code
+    assert connection.total_changes == before
