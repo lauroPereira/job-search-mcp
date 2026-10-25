@@ -6,7 +6,7 @@
 
 ## Decisões técnicas
 
-- **Python 3.12 com o SDK oficial de MCP (FastMCP), transporte stdio.** É o caminho mais curto para expor ferramentas tipadas a clientes como Claude Code e Claude Desktop. Registrado em `docs/architecture/decisions/0001-python-fastmcp-sqlite.md`.
+- **Python 3.12 com o pacote fastmcp, transporte stdio.** É o caminho mais curto para expor ferramentas tipadas a clientes como Claude Code e Claude Desktop. Registrado em `docs/architecture/decisions/0001-python-fastmcp-sqlite.md` (Python, SQLite e stdio) e em `docs/architecture/decisions/0003-usar-pacote-fastmcp.md` (escolha do pacote `fastmcp` no lugar do SDK oficial).
 - **SQLite pela biblioteca padrão (`sqlite3`), sem ORM.** Um arquivo local, sem serviço, suficiente para o volume previsto. Mesma decisão 0001.
 - **Lógica de domínio separada do servidor.** As regras (status válidos, follow-up, histórico, resumo) ficam em funções Python puras, que recebem a conexão e a data de referência. O módulo do servidor só registra as ferramentas e converte entrada e saída. Isso permite testar tudo sem subir o servidor.
 - **Data de referência injetável.** Nenhuma regra chama a data atual por conta própria; a data entra como parâmetro, com padrão "hoje" apenas na borda (a ferramenta).
@@ -48,7 +48,7 @@ tests/
 | id | inteiro, chave | |
 | company | texto, obrigatório | |
 | title | texto, obrigatório | |
-| url | texto, único | usado para evitar duplicidade |
+| url | texto, único, obrigatório | usado para evitar duplicidade |
 | track | texto | data, systems, product, ai, other |
 | score | real | 0 a 10 |
 | status | texto, obrigatório | lista fechada, ver abaixo |
@@ -87,13 +87,13 @@ Ferramentas MCP (contrato público do projeto):
 
 | Ferramenta | Parâmetros | Retorno |
 |---|---|---|
-| `list_jobs` | `status?`, `track?`, `min_score?` | lista de vagas |
-| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada, ou erro de duplicidade com a vaga existente |
-| `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas |
-| `list_contacts` | `status?`, `company?` | lista de contatos |
-| `log_interaction` | `contact_id`, `summary`, `date?`, `status?`, `next_step?` | contato atualizado, follow-up novo e vaga vinculada, se houver |
+| `list_jobs` | `status?`, `track?`, `min_score?` | objeto com a lista de vagas em `jobs` |
+| `add_job` | `company`, `title`, `url`, `track?`, `score?`, `next_step?` | vaga criada no status `suggested`, ou erro de duplicidade com a vaga existente |
+| `update_job` | `job_id`, `status?`, `next_step?`, `applied_on?`, `last_contact_on?`, `source` | vaga atualizada e linhas de histórico geradas; ao mudar para `applied` sem data de candidatura (nem gravada nem informada), `applied_on` recebe a data de referência, com a linha de histórico correspondente |
+| `list_contacts` | `status?`, `company?` | objeto com a lista de contatos em `contacts` |
+| `log_interaction` | `contact_id`, `summary`, `date?`, `status?`, `next_step?` | contato atualizado, follow-up novo e vaga vinculada, se houver; contato em `to_contact` registrado sem `status` avança para `awaiting_reply` (com `status` informado, vale o informado) |
 | `pending_followups` | `reference_date?`, `days_ahead?` (padrão 2) | vagas e contatos, cada um com `follow_up` e `state` (overdue, due_soon) |
-| `daily_summary` | `reference_date?` | contagem por status, vencidos, a vencer, fila de candidatura por nota e dias até um prazo opcional |
+| `daily_summary` | `reference_date?`, `deadline?` | contagem de vagas por status, contagem de contatos ativos (os que não estão em `closed`), vencidos, a vencer, fila de candidatura por nota e dias até o prazo (`deadline`), quando informado |
 
 Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado, renomear ferramenta ou parâmetro passa a ser mudança incompatível.
 
@@ -102,13 +102,13 @@ Nenhuma mudança incompatível, por ser a primeira versão. Depois de publicado,
 - **Unidade (domínio):** cálculo de follow-up de vaga e de contato, classificação por data de referência e validação de status. Cobre os critérios de follow-up e de status inválido.
 - **Unidade (vagas e contatos):** duplicidade de link, histórico gerado na atualização e interação que atualiza a vaga vinculada. Banco SQLite temporário por teste.
 - **Unidade (resumo):** com os dados sintéticos e data fixa, conferir contagens, vencidos, a vencer e a ordem da fila.
-- **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do SDK, para confirmar nomes, parâmetros e formato de retorno.
+- **Integração (servidor):** listar as ferramentas registradas e chamar uma delas pelo cliente em memória do pacote fastmcp (`from fastmcp import Client`), para confirmar nomes, parâmetros e formato de retorno, incluindo a saída estruturada (decisão 0003).
 - **Verificação manual:** conectar o servidor ao Claude Code por stdio e executar os cinco casos de uso da especificação; registrar o resultado em `docs/evidence/`.
-- **Privacidade:** um teste confere que os arquivos de `data/seed/` só usam empresas e nomes de uma lista fictícia.
 
 ## Riscos técnicos
 
-- **API do SDK de MCP diferente da esperada.** Mitigação: fixar a versão no `pyproject.toml` e consultar a documentação oficial antes da tarefa 05; a lógica não depende do SDK.
+- **API do pacote fastmcp diferente da esperada.** Mitigação: fixar a versão no `pyproject.toml` e consultar a documentação atual do fastmcp antes da tarefa 06; a lógica não depende do pacote. Ver a decisão 0003.
+- **Saída estruturada das ferramentas.** Em um teste com o SDK oficial, uma ferramenta com retorno `dict` chegou ao cliente só como texto. Mitigação: verificar na tarefa 06, com o fastmcp, o que o cliente recebe antes de fixar o formato de retorno (decisão 0003).
 - **Datas em texto no SQLite.** Mitigação: gravar sempre em ISO 8601 (AAAA-MM-DD) e converter em um único ponto (`db.py`).
 - **Banco real criado dentro do repositório por engano.** Mitigação: caminho padrão em `data/local/`, ignorado pelo Git, e teste que falha se o banco de teste não estiver em diretório temporário.
 - **Reversão:** projeto novo; reverter é descartar a branch da tarefa.

@@ -12,6 +12,8 @@ aceita
 
 Proposta e aceita pelo autor em 2026-10-10.
 
+A escolha da biblioteca de MCP foi substituída pela decisão 0003 (`0003-usar-pacote-fastmcp.md`); o restante desta decisão continua valendo.
+
 ## Contexto
 
 O projeto precisa expor ferramentas a clientes MCP rodando na máquina do usuário, guardar algumas centenas de vagas e contatos e funcionar sem serviço externo. O autor já mantém scripts em Python para o mesmo domínio e quer um MVP em um dia de trabalho. O repositório é público e não pode depender de infraestrutura paga.

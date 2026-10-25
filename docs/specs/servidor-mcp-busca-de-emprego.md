@@ -60,16 +60,30 @@ O agente consulta e atualiza o estado da busca por ferramentas MCP com contrato 
 
 ## Critérios de aceitação
 
-- [ ] As sete ferramentas aparecem para um cliente MCP conectado por stdio, com descrição e parâmetros tipados.
-- [ ] Cadastrar duas vezes o mesmo link devolve erro de duplicidade e não cria a segunda vaga.
-- [ ] Status inválido é rejeitado com a lista de status válidos.
-- [ ] Com data de referência fixa, uma vaga com último contato há 7 dias aparece como vencida e outra com 5 dias aparece como a vencer.
-- [ ] Vaga em status encerrado não aparece em `pending_followups`.
-- [ ] `log_interaction` em contato vinculado a uma vaga atualiza a data do último contato da vaga.
-- [ ] Toda chamada de `update_job` que muda o status gera uma linha de histórico com valor anterior e novo.
-- [ ] `daily_summary` devolve contagem por status, itens vencidos, itens a vencer e fila de candidatura ordenada por nota.
-- [ ] A suíte de testes roda sem acesso à rede e sem tocar em banco fora do diretório temporário de teste.
-- [ ] O repositório não contém nomes de pessoas, empresas em negociação nem valores reais; os dados em `data/seed/` são identificáveis como fictícios.
+Situação em 2026-10-10 (tarefa 07). "Evidência" é `docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md`, feita por um cliente MCP programático via stdio; os testes ficam em `tests/`.
+
+- [x] As sete ferramentas aparecem para um cliente MCP conectado por stdio, com descrição e parâmetros tipados.
+  - Comprovação: `test_server.py::test_server_runs_over_stdio_as_a_subprocess`, `test_server_lists_exactly_the_seven_tools` e `test_tool_parameters_match_the_plan`; evidência, seção "Conexão".
+- [x] Cadastrar duas vezes o mesmo link devolve erro de duplicidade e não cria a segunda vaga.
+  - Comprovação: `test_jobs.py::test_add_job_with_duplicate_url_returns_error_and_creates_nothing` e `test_server.py::test_duplicate_url_arrives_as_a_structured_error`; evidência, caso 4.
+- [x] Status inválido é rejeitado com a lista de status válidos.
+  - Comprovação: `test_domain.py::test_invalid_status_error_lists_the_valid_statuses` e `test_server.py::test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones`; evidência, caso 3.
+- [x] Com data de referência fixa, uma vaga com último contato há 7 dias aparece como vencida e outra com 5 dias aparece como a vencer.
+  - Comprovação: `test_summary.py::test_pending_followups_lists_overdue_and_due_soon_from_the_seed` (vagas 1 e 3) e `test_server.py::test_pending_followups_defaults_to_today_and_two_days_ahead`; evidência, caso 1.
+- [x] Vaga em status encerrado não aparece em `pending_followups`.
+  - Comprovação: `test_summary.py::test_closed_and_not_started_jobs_and_contacts_are_left_out` e `test_job_that_gets_closed_leaves_the_pending_followups`.
+- [x] `log_interaction` em contato vinculado a uma vaga atualiza a data do último contato da vaga.
+  - Comprovação: `test_contacts.py::test_log_interaction_updates_last_contact_of_linked_job_with_history` e `test_server.py::test_log_interaction_updates_the_contact_and_the_linked_job`; evidência, caso 2.
+- [x] Toda chamada de `update_job` que muda o status gera uma linha de histórico com valor anterior e novo.
+  - Comprovação: `test_jobs.py::test_update_job_status_generates_history_with_old_and_new_value` e `test_server.py::test_update_job_writes_history_dated_today`; evidência, caso 3.
+- [x] `daily_summary` devolve contagem por status, itens vencidos, itens a vencer e fila de candidatura ordenada por nota.
+  - Comprovação: `test_summary.py::test_daily_summary_counts_match_the_seed` e `test_application_queue_is_ordered_by_score_from_highest_to_lowest`; `test_server.py::test_daily_summary_uses_today_and_returns_the_expected_object`; evidência, caso 1.
+- [x] A suíte de testes roda sem acesso à rede e sem tocar em banco fora do diretório temporário de teste.
+  - Comprovação: `test_db.py::test_test_database_lives_in_temporary_directory` e `test_server.py::test_nothing_is_written_outside_the_temporary_directory`. Sem rede: a suíte foi executada com as conexões de saída e a resolução de nomes bloqueadas no processo do pytest (só o endereço local liberado) e passou sem nenhuma tentativa bloqueada; o registro está na Validação da tarefa 07. Limite: o bloqueio não alcança o subprocesso do teste por stdio, e não há teste permanente que impeça o uso de rede.
+- [x] O repositório não contém dados reais de pessoas nem de processos seletivos; os dados em `data/seed/` são de demonstração.
+  - Comprovação: por inspeção. Os nomes do seed são fictícios (por exemplo, "Ana Exemplo", "Banco Aurora") e os links usam `example.com`; `git status` e `git diff --staged` foram conferidos antes de cada commit, e uma busca nos arquivos versionados por e-mails, telefones, CPF, valores em reais e caminhos de máquina não encontrou nada. A confirmação final de que nada ali é real cabe ao autor.
+
+**Pendente:** a verificação manual dos cinco casos de uso em uma conversa com um agente, no Claude Code e no Claude Desktop, prevista na estratégia de testes do plano. Os critérios acima foram comprovados por testes automatizados e por um cliente MCP programático, e não por essa conversa. Os passos estão em "Pendências para o responsável humano", na evidência.
 
 ## Riscos
 
