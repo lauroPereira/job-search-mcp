@@ -11,25 +11,27 @@ job-search-mcp export <pasta>            # escreve os seis arquivos na pasta
 ```
 
 - O banco é o de `JOB_SEARCH_DB`, como no servidor.
-- O relatório sai na saída padrão (os subcomandos não servem o protocolo MCP). Problemas que impedem o comando (pasta inexistente, banco inacessível, arquivo que não é UTF-8) saem na saída de erro, com código 1.
+- O relatório sai na saída padrão (os subcomandos não servem o protocolo MCP). Problemas que impedem o comando (pasta inexistente, banco inacessível) saem na saída de erro, com código 1.
 - Linhas com erro aparecem no relatório e **não** mudam o código de saída: o comando termina com 0 e, com `--apply`, grava as demais linhas.
 - Sem `--apply`, a importação roda inteira numa transação que é desfeita no fim: o relatório é exatamente o que `--apply` faria, e os dados do banco não mudam. Se o arquivo do banco ainda não existir, ele é criado vazio, só com o esquema, como na primeira chamada do servidor.
-- Com `--apply`, tudo é gravado numa transação única. Cada registro criado ganha linhas no histórico com `source_type = import` e, em `source_ref`, o arquivo e a linha de origem (por exemplo, `jobs.csv:3`).
-- `export` **recusa** a pasta se qualquer um dos seis arquivos já existir nela, sem escrever nada. Use uma pasta nova ou vazia; ela é criada quando não existe.
+- Com `--apply`, tudo é gravado numa transação única. Cada registro criado ganha linhas no histórico com `source_type = import` e, em `source_ref`, o arquivo e a linha de origem (por exemplo, `jobs.csv:3`). A linha é a do início do registro, inclusive quando uma célula entre aspas tem quebra de linha; o relatório usa a mesma numeração.
+- `export` **recusa** a pasta se qualquer um dos seis arquivos já existir nela, sem escrever nada. Use uma pasta nova ou vazia; ela é criada quando não existe. Os arquivos saem em UTF-8 **com BOM** e separados por vírgula, para o Excel abrir os acentos corretamente.
 
 ## Regras gerais
 
-- Codificação **UTF-8**, com ou sem BOM (o Excel grava com BOM).
-- Separador **vírgula**; campos com vírgula, aspas ou quebra de linha vão entre aspas duplas, como no padrão CSV.
-- A primeira linha é o cabeçalho, com os nomes das colunas abaixo. A ordem das colunas é livre e as opcionais podem faltar.
-- Um arquivo com coluna desconhecida ou sem uma coluna obrigatória é recusado inteiro (aparece no relatório como erro na linha 1).
-- Espaços nas pontas das células são removidos; célula vazia é valor ausente.
-- Datas no formato ISO **`AAAA-MM-DD`**. `created_at` aceita também `AAAA-MM-DD HH:MM:SS`.
+- Codificação **UTF-8**, com ou sem BOM. No Excel, use "Salvar como" → **CSV UTF-8 (delimitado por vírgulas)**. Um arquivo em outra codificação (como o "CSV (separado por vírgulas)" do Excel em português, que grava em Windows-1252) ou que não seja um CSV válido é recusado **sozinho**, com o nome do arquivo e a dica de salvá-lo como CSV UTF-8; os demais arquivos seguem.
+- Separador **vírgula** ou **ponto e vírgula** (o Excel em português salva com `;`), detectado pela linha de cabeçalho: vale o que aparecer mais nela. Campos com o separador, aspas ou quebra de linha vão entre aspas duplas, como no padrão CSV.
+- A primeira linha é o cabeçalho, com os nomes das colunas abaixo, comparados **sem diferenciar maiúsculas** e sem os espaços das pontas (`" Name "` vale `name`). A ordem das colunas é livre e as opcionais podem faltar. Colunas de cabeçalho vazio são ignoradas, com o que houver abaixo delas.
+- Um arquivo com coluna desconhecida, repetida ou sem uma coluna obrigatória é recusado inteiro (aparece no relatório como erro na linha 1).
+- Espaços nas pontas das células são removidos; célula vazia é valor ausente. Linhas totalmente vazias (inclusive só com separadores) são puladas. Células a mais no fim da linha são ignoradas se estiverem vazias; preenchidas, são erro na linha.
+- Datas no formato ISO **`AAAA-MM-DD`**. `created_at` aceita também `AAAA-MM-DD HH:MM:SS`. Datas **depois do dia da importação** são erro na linha, como nas ferramentas do servidor.
 - Números com **ponto** decimal (`8.5`).
 - **Todos os arquivos são opcionais**: a pasta pode ter só alguns. Eles são lidos nesta ordem, e um arquivo só cita registros dos anteriores ou do banco: `companies.csv`, `people.csv`, `jobs.csv`, `interactions.csv`, `stages.csv`, `links.csv`.
 - A importação **só cria** registros. Uma linha duplicada (pela chave de cada arquivo) é pulada e listada como duplicada, mesmo que as outras colunas sejam diferentes; a duplicidade vale contra o banco e contra as linhas anteriores do mesmo arquivo.
 - **Nome normalizado:** minúsculas, sem acentos, sem espaços nas pontas e com espaços internos repetidos reduzidos a um (`"  Clínica  BOREAL "` → `clinica boreal`).
-- **Link normalizado:** sem espaços nas pontas, esquema e domínio em minúsculas, sem fragmento (`#...`) e sem `/` no fim do caminho. A consulta (`?...`) é mantida.
+- **Link normalizado:** sem espaços nas pontas, esquema e domínio em minúsculas, sem fragmento (`#...`) e sem `/` no fim do caminho. A consulta (`?...`) é mantida. `add_job` usa a mesma regra para recusar vaga repetida; o link é gravado como veio.
+- **Link da vaga** (`url` e `job_url`) precisa ser completo, com `http://` ou `https://` e domínio. Texto como `-`, `não tem` ou `vagas.example.com/x` (sem esquema) é erro na linha, e não duplicado.
+- **Vaga sem link próprio** (indicação por mensagem, vaga divulgada em conversa): use um link único que a identifique, por exemplo a página de carreiras da empresa com uma consulta própria (`https://empresa.example.com/carreiras?vaga=analista-de-dados`). Não use fragmento (`#...`) para diferenciar vagas: ele é descartado na comparação. Use sempre o mesmo link para a mesma vaga, para a importação seguinte reconhecê-la.
 
 ## Como os arquivos se referenciam
 

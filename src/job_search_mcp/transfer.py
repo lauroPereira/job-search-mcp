@@ -14,11 +14,11 @@ columns differ.
 """
 
 import csv
+import io
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from pathlib import Path
-from urllib.parse import urlsplit, urlunsplit
 
 from job_search_mcp import db, domain, history, jobs
 
@@ -125,34 +125,49 @@ class ImportReport:
         return "\n".join(lines)
 
 
-def normalize_url(url: str) -> str:
-    """Job URL used to find duplicates: trimmed, scheme and host in lowercase, without the
-    fragment (#...) and without a trailing slash on the path."""
-    parts = urlsplit(url.strip())
-    return urlunsplit(
-        (parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, "")
-    )
+# The import and add_job find duplicate jobs with the same rule (db.normalize_url).
+normalize_url = db.normalize_url
 
 
-def _iso_date(column: str, value: str | None) -> str | None:
+def _url(column: str, value: str) -> str:
+    """A job link must be a full http(s) link; anything else is an error in the row."""
+    if not db.is_full_url(value):
+        raise RowError(
+            f"invalid {column} '{value}': use a full link starting with http:// or https:// "
+            "(a job without its own link can use a unique link, see docs/import-format.md)"
+        )
+    return value
+
+
+def _not_future(column: str, value: str, parsed: date, today: date | None) -> None:
+    if today is not None and parsed > today:
+        raise RowError(f"invalid {column} '{value}': it cannot be after today ({today})")
+
+
+def _iso_date(column: str, value: str | None, today: date | None) -> str | None:
+    """A date as stored (YYYY-MM-DD); a date after `today` (when given) is an error."""
     if value is None:
         return None
     try:
-        return date.fromisoformat(value).isoformat()
+        parsed = date.fromisoformat(value)
     except ValueError:
         raise RowError(f"invalid {column} '{value}': use YYYY-MM-DD") from None
+    _not_future(column, value, parsed, today)
+    return parsed.isoformat()
 
 
-def _timestamp(column: str, value: str | None) -> str | None:
+def _timestamp(column: str, value: str | None, today: date | None) -> str | None:
     """created_at as stored (YYYY-MM-DD HH:MM:SS); a date alone gets midnight."""
     if value is None:
         return None
     try:
-        return datetime.fromisoformat(value).strftime("%Y-%m-%d %H:%M:%S")
+        parsed = datetime.fromisoformat(value)
     except ValueError:
         raise RowError(
             f"invalid {column} '{value}': use YYYY-MM-DD or YYYY-MM-DD HH:MM:SS"
         ) from None
+    _not_future(column, value, parsed.date(), today)
+    return parsed.strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _choice(column: str, value: str | None, valid: tuple[str, ...], default=None):
@@ -189,29 +204,57 @@ def _confirmed(value: str | None) -> bool:
     raise RowError(f"invalid confirmed '{value}': use true or false")
 
 
+def _delimiter(header_line: str) -> str:
+    """The separator of a file, read from its header line: ";" (as Excel saves CSV in
+    pt-BR) when it has more semicolons than commas, "," otherwise."""
+    return ";" if header_line.count(";") > header_line.count(",") else ","
+
+
 def _read(path: Path, name: str) -> tuple[list[tuple[int, dict]], str | None]:
-    """Rows of a file as (line, {column: text or None}), or the reason the file is refused."""
-    with path.open(encoding="utf-8-sig", newline="") as file:
-        reader = csv.DictReader(file)
-        header = [column.strip() for column in reader.fieldnames or []]
-        unknown = [column for column in header if column not in COLUMNS[name]]
-        missing = [column for column in REQUIRED[name] if column not in header]
-        if unknown or missing:
-            problems = []
-            if missing:
-                problems.append(f"missing required columns: {', '.join(missing)}")
-            if unknown:
-                problems.append(f"unknown columns: {', '.join(unknown)}")
+    """Rows of a file as (first line of the record, {column: text or None}), or the reason
+    the whole file is refused.
+
+    The header is compared without case and surrounding spaces; header cells left blank
+    are ignored, as are blank extra cells and blank rows. A row with a filled cell beyond
+    the header is marked with "__extra__".
+    """
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except UnicodeDecodeError:
+        return [], f"{name} is not UTF-8: save it as CSV UTF-8 and import again"
+    delimiter = _delimiter(text.split("\n", 1)[0])
+    reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+    try:
+        header = [column.strip().lower() for column in next(reader, [])]
+        named = [column for column in header if column]
+        repeated = sorted({column for column in named if named.count(column) > 1})
+        unknown = [column for column in named if column not in COLUMNS[name]]
+        missing = [column for column in REQUIRED[name] if column not in named]
+        problems = []
+        if missing:
+            problems.append(f"missing required columns: {', '.join(missing)}")
+        if unknown:
+            problems.append(f"unknown columns: {', '.join(unknown)}")
+        if repeated:
+            problems.append(f"repeated columns: {', '.join(repeated)}")
+        if problems:
             return [], "; ".join(problems)
-        reader.fieldnames = header
         rows = []
-        for row in reader:
+        line = reader.line_num + 1
+        for cells in reader:
+            # A record may span lines (a line break inside quotes): report its first line.
+            start, line = line, reader.line_num + 1
+            cells = [domain.optional_text(cell) for cell in cells]
+            if not any(cells):
+                continue
             values = {column: None for column in COLUMNS[name]}
-            for column in header:
-                values[column] = domain.optional_text(row.get(column))
-            if None in row:
-                values = {"__extra__": True}
-            rows.append((reader.line_num, values))
+            for column, cell in zip(header, cells, strict=False):
+                if column:
+                    values[column] = cell
+            extra = any(cells[len(header) :])
+            rows.append((start, {"__extra__": True} if extra else values))
+    except csv.Error as failure:
+        return [], f"{name} is not a valid CSV file ({failure}): save it as CSV UTF-8"
     return rows, None
 
 
@@ -281,7 +324,7 @@ class _Importer:
         return self.people[key]
 
     def _job_application(self, url: str) -> tuple[int, int]:
-        job_id = self.jobs.get(normalize_url(url))
+        job_id = self.jobs.get(normalize_url(_url("job_url", url)))
         if job_id is None:
             raise RowError(f"unknown job URL '{url}'")
         return job_id, jobs.application_id(self.connection, job_id)
@@ -309,7 +352,7 @@ class _Importer:
 
     def people_csv(self, row: dict, ref: str) -> str | None:
         status = _choice("status", row["status"], domain.CONTACT_STATUSES, DEFAULT_PERSON_STATUS)
-        last_contact_on = _iso_date("last_contact_on", row["last_contact_on"])
+        last_contact_on = _iso_date("last_contact_on", row["last_contact_on"], self.changed_on)
         company = row["company"]
         company_id = None if company is None else self._find_company(company)
         key = (db.normalize_name(row["name"]), company_id)
@@ -342,11 +385,11 @@ class _Importer:
     def jobs_csv(self, row: dict, ref: str) -> str | None:
         track = _choice("track", row["track"], domain.JOB_TRACKS)
         score = _score(row["score"])
-        created_at = _timestamp("created_at", row["created_at"])
+        created_at = _timestamp("created_at", row["created_at"], self.changed_on)
         status = _choice("status", row["status"], domain.JOB_STATUSES, DEFAULT_JOB_STATUS)
-        applied_on = _iso_date("applied_on", row["applied_on"])
-        last_contact_on = _iso_date("last_contact_on", row["last_contact_on"])
-        normalized = normalize_url(row["url"])
+        applied_on = _iso_date("applied_on", row["applied_on"], self.changed_on)
+        last_contact_on = _iso_date("last_contact_on", row["last_contact_on"], self.changed_on)
+        normalized = normalize_url(_url("url", row["url"]))
         if normalized in self.jobs:
             return self._duplicate(("job", normalized), f"job URL '{row['url']}'")
         company_id = self._company_id(row["company"], ref)
@@ -389,7 +432,7 @@ class _Importer:
         return None
 
     def interactions(self, row: dict, ref: str) -> str | None:
-        on = _iso_date("date", row["date"])
+        on = _iso_date("date", row["date"], self.changed_on)
         source_type = _choice("source_type", row["source_type"], domain.SOURCE_TYPES, IMPORT_SOURCE)
         person_id = self._person_id(row["person"], row["person_company"])
         key = ("interaction", person_id, on, row["summary"])
@@ -409,7 +452,7 @@ class _Importer:
 
     def stages(self, row: dict, ref: str) -> str | None:
         kind = _choice("kind", row["kind"], domain.STAGE_KINDS)
-        on = _iso_date("date", row["date"])
+        on = _iso_date("date", row["date"], self.changed_on)
         result = _choice("result", row["result"], domain.STAGE_RESULTS, domain.DEFAULT_STAGE_RESULT)
         job_id, application_id = self._job_application(row["job_url"])
         key = ("stage", application_id, kind, on)
@@ -617,7 +660,8 @@ def export_folder(connection: sqlite3.Connection, folder: Path) -> dict[str, int
     counts = {}
     for name in FILES:
         rows = connection.execute(EXPORT_QUERIES[name]).fetchall()
-        with (folder / name).open("x", encoding="utf-8", newline="") as file:
+        # With BOM, so Excel opens the accents right; the import accepts it.
+        with (folder / name).open("x", encoding="utf-8-sig", newline="") as file:
             writer = csv.writer(file)
             writer.writerow(COLUMNS[name])
             writer.writerows([_text(value) for value in row] for row in rows)

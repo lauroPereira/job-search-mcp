@@ -45,3 +45,4 @@ data/local/
 *.ods
 *.csv
 !data/seed/*.csv
+!tests/fixtures/**/*.csv

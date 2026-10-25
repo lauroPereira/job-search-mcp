@@ -97,6 +97,27 @@ def test_add_job_with_duplicate_url_returns_error_and_creates_nothing(connection
     assert count(connection, "job") == 15
 
 
+@pytest.mark.parametrize(
+    "variant",
+    [
+        "HTTPS://Vagas.Example.com/banco-aurora/data-engineer",
+        "https://vagas.example.com/banco-aurora/data-engineer/",
+        "https://vagas.example.com/banco-aurora/data-engineer#descricao",
+    ],
+)
+def test_add_job_finds_duplicates_by_the_normalized_url_as_the_import(connection, variant):
+    plan = jobs.plan_add_job(connection, "Banco Aurora", "Outro", variant, reference_date=ADDED_ON)
+    assert plan["error"] == "duplicate_url"
+    assert plan["job"]["id"] == 1
+    # Another query string is another job; the link is stored as it was given.
+    other = f"{NEW_URL}?id=2"
+    added = write(
+        connection,
+        jobs.plan_add_job(connection, "Banco Aurora", "Outro", other, reference_date=ADDED_ON),
+    )
+    assert added["url"] == other
+
+
 def test_add_job_twice_with_the_same_url_keeps_only_the_first(connection):
     first = write(
         connection,

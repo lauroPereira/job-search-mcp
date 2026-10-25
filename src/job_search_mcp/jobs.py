@@ -182,12 +182,21 @@ def plan_add_job(
     if domain.is_error(changed_on):
         return changed_on
     url = url.strip()
-    existing = connection.execute("SELECT id FROM job WHERE url = ?", (url,)).fetchone()
-    if existing:
+    # The same rule as the import (db.normalize_url); the link is stored as it was given.
+    normalized = db.normalize_url(url)
+    existing = next(
+        (
+            row["id"]
+            for row in connection.execute("SELECT id, url FROM job ORDER BY id")
+            if db.normalize_url(row["url"]) == normalized
+        ),
+        None,
+    )
+    if existing is not None:
         return domain.error(
             "duplicate_url",
-            f"A job with this URL already exists (id {existing['id']}).",
-            job=get_job(connection, existing["id"], settings),
+            f"A job with this URL already exists (id {existing}).",
+            job=get_job(connection, existing, settings),
         )
     stored_company = connection.execute(
         "SELECT name FROM company WHERE normalized_name = ?", (db.normalize_name(company),)

@@ -9,6 +9,7 @@ import sys
 import unicodedata
 from datetime import date, datetime
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 DB_ENV_VAR = "JOB_SEARCH_DB"
 # Project root (the directory that holds data/), so paths do not depend on the working directory.
@@ -167,6 +168,21 @@ def normalize_name(name: str) -> str:
     decomposed = unicodedata.normalize("NFKD", name.lower())
     unaccented = "".join(char for char in decomposed if not unicodedata.combining(char))
     return " ".join(unaccented.split())
+
+
+def normalize_url(url: str) -> str:
+    """Job link used to find duplicates (add_job and the import): trimmed, scheme and host
+    in lowercase, without the fragment (#...) and without a trailing slash on the path."""
+    parts = urlsplit(url.strip())
+    return urlunsplit(
+        (parts.scheme.lower(), parts.netloc.lower(), parts.path.rstrip("/"), parts.query, "")
+    )
+
+
+def is_full_url(url: str) -> bool:
+    """Whether a text is a full http(s) link, with a host."""
+    parts = urlsplit(url.strip())
+    return parts.scheme.lower() in ("http", "https") and bool(parts.netloc)
 
 
 def ensure_company(connection: sqlite3.Connection, name: str | None) -> int | None:

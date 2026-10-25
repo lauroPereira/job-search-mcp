@@ -294,6 +294,140 @@ def test_normalize_url():
         "https://vagas.example.com/A/1"
     )
     assert transfer.normalize_url("https://x.example.com/a?id=2") == "https://x.example.com/a?id=2"
+    assert transfer.normalize_url is db.normalize_url  # the same rule as add_job
+
+
+def test_a_file_that_is_not_utf8_is_refused_alone(empty, tmp_path):
+    folder = write_files(tmp_path / "in", {"people.csv": "name\nPessoa Um\n"})
+    (folder / "companies.csv").write_bytes("name\nEmpresa Ação\n".encode("cp1252"))
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    assert report.files["companies.csv"].errors == [
+        (1, "companies.csv is not UTF-8: save it as CSV UTF-8 and import again")
+    ]
+    assert report.files["people.csv"].new == [2]
+    assert count(empty, "contact") == 1
+
+
+def test_a_broken_csv_is_refused_alone(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        # A cell above the csv module's field size limit makes the reader fail.
+        {"companies.csv": "name\n" + "x" * 200_000 + "\n", "people.csv": "name\nPessoa Um\n"},
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    [(line, reason)] = report.files["companies.csv"].errors
+    assert line == 1
+    assert reason.startswith("companies.csv is not a valid CSV file")
+    assert "save it as CSV UTF-8" in reason
+    assert report.files["people.csv"].new == [2]
+
+
+def test_semicolon_separator_is_detected_from_the_header(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        {
+            "companies.csv": "name;sector;notes\nEmpresa Alfa;Varejo;Vírgula, aqui\n",
+            "jobs.csv": "url,company,title\nhttps://vagas.example.com/a,Empresa Alfa,Analista\n",
+        },
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    assert report.error_count == 0
+    row = empty.execute("SELECT name, sector, notes FROM company").fetchone()
+    assert tuple(row) == ("Empresa Alfa", "Varejo", "Vírgula, aqui")
+    assert count(empty, "job") == 1
+
+
+@pytest.mark.parametrize("url", ["-", "vagas.example.com/x", "ftp://vagas.example.com/x"])
+def test_a_job_link_that_is_not_a_full_http_link_is_an_error(empty, tmp_path, url):
+    folder = write_files(
+        tmp_path / "in",
+        {
+            "jobs.csv": (
+                f"url,company,title\n{url},Empresa,Vaga 1\n{url},Empresa,Vaga 2\n"
+                "https://vagas.example.com/ok,Empresa,Vaga 3\n"
+            ),
+            "stages.csv": f"job_url,kind,date\n{url},hr,2026-03-01\n",
+        },
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    jobs_report = report.files["jobs.csv"]
+    assert jobs_report.new == [4] and jobs_report.duplicates == []
+    assert [line for line, _ in jobs_report.errors] == [2, 3]
+    assert "use a full link starting with http:// or https://" in jobs_report.errors[0][1]
+    assert report.files["stages.csv"].errors[0][1].startswith(f"invalid job_url '{url}'")
+
+
+def test_header_and_blank_cells_are_tolerated(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        {
+            "companies.csv": (
+                " Name , SECTOR ,,\n"
+                "Empresa Alfa,Varejo,,\n"
+                ",,,\n"
+                "\n"
+                "Empresa Beta,,ignorada, ,  \n"  # under a blank header cell, blank extra
+                "Empresa Gama,,,,cheia\n"  # a filled cell beyond the header
+            ),
+        },
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    companies = report.files["companies.csv"]
+    assert companies.new == [2, 5]
+    assert companies.errors == [(6, "more cells than columns in the header")]
+    names = [row[0] for row in empty.execute("SELECT name FROM company ORDER BY id")]
+    assert names == ["Empresa Alfa", "Empresa Beta"]
+
+
+def test_a_repeated_column_refuses_the_file(empty, tmp_path):
+    folder = write_files(tmp_path / "in", {"companies.csv": "name,Name\nA,B\n"})
+    report = transfer.import_folder(empty, folder, ON)
+    assert report.files["companies.csv"].errors == [(1, "repeated columns: name")]
+
+
+def test_lines_are_the_first_line_of_each_record(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        {"companies.csv": 'name,notes\nEmpresa Alfa,"linha um\nlinha dois"\nEmpresa Beta,\n,x\n'},
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    companies = report.files["companies.csv"]
+    assert companies.new == [2, 4]
+    assert companies.errors == [(5, "missing required value: name")]
+    refs = [row[0] for row in empty.execute("SELECT DISTINCT source_ref FROM history ORDER BY id")]
+    assert refs == ["companies.csv:2", "companies.csv:4"]
+
+
+def test_dates_after_the_import_day_are_errors(empty, tmp_path):
+    folder = write_files(
+        tmp_path / "in",
+        {
+            "people.csv": "name,last_contact_on\nPessoa Um,2026-03-17\nPessoa Dois,2026-03-16\n",
+            "jobs.csv": (
+                "url,company,title,applied_on,created_at\n"
+                "https://vagas.example.com/1,Empresa,Vaga,2026-03-17,\n"
+                "https://vagas.example.com/2,Empresa,Vaga,,2026-03-17 08:00:00\n"
+                "https://vagas.example.com/3,Empresa,Vaga,2026-03-16,2026-03-16 08:00:00\n"
+            ),
+            "stages.csv": "job_url,kind,date\nhttps://vagas.example.com/3,hr,2026-04-01\n",
+            "interactions.csv": "person,date,summary\nPessoa Dois,2026-03-20,Conversa\n",
+        },
+    )
+    report = transfer.import_folder(empty, folder, ON, apply=True)
+    assert report.files["people.csv"].errors == [
+        (2, "invalid last_contact_on '2026-03-17': it cannot be after today (2026-03-16)")
+    ]
+    assert [line for line, _ in report.files["jobs.csv"].errors] == [2, 3]
+    assert report.files["jobs.csv"].new == [4]
+    assert "cannot be after today" in report.files["stages.csv"].errors[0][1]
+    assert "cannot be after today" in report.files["interactions.csv"].errors[0][1]
+
+
+def test_export_writes_utf8_with_bom(connection, tmp_path):
+    transfer.export_folder(connection, tmp_path / "out")
+    raw = (tmp_path / "out" / "companies.csv").read_bytes()
+    assert raw.startswith(b"\xef\xbb\xbfname,")
+    assert "Clínica Boreal" in raw.decode("utf-8-sig")
 
 
 @pytest.fixture
