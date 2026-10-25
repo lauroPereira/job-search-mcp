@@ -510,7 +510,7 @@ def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(c
     assert plan.base_versions == {"application:3": 1}
     result = write(connection, plan)
     assert result["stage"] == {
-        "id": 1,
+        "id": 10,  # after the 9 stages of the seed
         "kind": "screening",
         "date": "2026-03-12",
         "result": "pending",
@@ -525,10 +525,10 @@ def test_add_stage_without_status_creates_the_stage_and_moves_the_last_contact(c
         " WHERE entity = 'application_stage' ORDER BY id"
     ).fetchall()
     assert [tuple(row) for row in stage_lines] == [
-        (1, "application_id", "3", "2026-03-16", "email"),
-        (1, "kind", "screening", "2026-03-16", "email"),
-        (1, "date", "2026-03-12", "2026-03-16", "email"),
-        (1, "result", "pending", "2026-03-16", "email"),
+        (10, "application_id", "3", "2026-03-16", "email"),
+        (10, "kind", "screening", "2026-03-16", "email"),
+        (10, "date", "2026-03-12", "2026-03-16", "email"),
+        (10, "result", "pending", "2026-03-16", "email"),
     ]
 
 

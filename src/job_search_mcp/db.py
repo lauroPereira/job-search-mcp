@@ -1,6 +1,8 @@
-"""SQLite connection, schema creation, migration from v0.1.0 and synthetic seed loading."""
+"""SQLite connection, schema creation and migration from v0.1.0.
 
-import csv
+The synthetic seed (SEED_DIR) is loaded by the importer: see transfer.load_seed.
+"""
+
 import os
 import sqlite3
 import sys
@@ -13,32 +15,6 @@ DB_ENV_VAR = "JOB_SEARCH_DB"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "local" / "job_search.db"
 SEED_DIR = PROJECT_ROOT / "data" / "seed"
-
-# Columns of the seed CSV files (still the v0.1.0 format; the import format comes later).
-JOB_COLUMNS = (
-    "id",
-    "company",
-    "title",
-    "url",
-    "track",
-    "score",
-    "status",
-    "next_step",
-    "applied_on",
-    "last_contact_on",
-    "created_at",
-)
-CONTACT_COLUMNS = (
-    "id",
-    "name",
-    "company",
-    "relationship",
-    "channel",
-    "status",
-    "next_step",
-    "last_contact_on",
-    "job_id",
-)
 
 # Schema version kept in PRAGMA user_version: 0 is the v0.1.0 database, 2 the v0.2.0 one.
 SCHEMA_VERSION = 2
@@ -424,50 +400,3 @@ def _migrate_from_v1(connection: sqlite3.Connection) -> list[str]:
         )
     report += [f"Company {text!r} stored as {name!r}." for text, name in joined.items()]
     return report
-
-
-def _read_csv(path: Path, columns: tuple[str, ...]) -> list[dict]:
-    """Read a seed CSV as dicts with the given columns, turning empty cells into NULL."""
-    with path.open(encoding="utf-8", newline="") as file:
-        return [{column: row[column] or None for column in columns} for row in csv.DictReader(file)]
-
-
-def load_seed(connection: sqlite3.Connection, seed_dir: Path = SEED_DIR) -> None:
-    """Insert the synthetic demo jobs and contacts from the seed CSV files.
-
-    The CSV files keep the v0.1.0 format: each job row becomes a company (joined by
-    normalized name), a job and its application; each contact row a person, whose job_id
-    becomes a link with role 'contact'. Meant for an empty database only: it is not
-    idempotent. The seed rows carry fixed ids and unique URLs, so a second load raises
-    sqlite3.IntegrityError. Everything is inserted in a single transaction, so a failed load
-    leaves no partial data behind.
-    """
-    jobs = _read_csv(seed_dir / "jobs.csv", JOB_COLUMNS)
-    contacts = _read_csv(seed_dir / "contacts.csv", CONTACT_COLUMNS)
-    with connection:
-        for job in jobs:
-            _insert_job(connection, job, ensure_company(connection, job["company"]))
-            connection.execute(
-                "INSERT INTO application (job_id, status, applied_on, last_contact_on, next_step)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (
-                    job["id"],
-                    job["status"],
-                    job["applied_on"],
-                    job["last_contact_on"],
-                    job["next_step"],
-                ),
-            )
-        for contact in contacts:
-            company_id = ensure_company(connection, contact["company"])
-            _insert_contact(connection, contact, company_id)
-            if contact["job_id"]:
-                cursor = connection.execute(
-                    "INSERT INTO application_person (application_id, contact_id, role, confirmed)"
-                    " SELECT id, ?, 'contact', 1 FROM application WHERE job_id = ?",
-                    (contact["id"], contact["job_id"]),
-                )
-                if cursor.rowcount != 1:
-                    raise sqlite3.IntegrityError(
-                        f"Seed contact {contact['id']} points to unknown job {contact['job_id']}."
-                    )

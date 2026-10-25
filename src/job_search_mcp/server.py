@@ -8,17 +8,19 @@ applies it.
 """
 
 import argparse
+import csv
 import datetime
 import sqlite3
 import sys
 from collections.abc import Iterator
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastmcp import FastMCP
 from pydantic import Field
 
-from job_search_mcp import companies, config, contacts, db, domain, jobs, proposals
+from job_search_mcp import companies, config, contacts, db, domain, jobs, proposals, transfer
 from job_search_mcp import summary as summary_queries
 
 mcp = FastMCP(
@@ -633,11 +635,15 @@ def daily_summary(
         )
 
 
+# The files of data/seed/ (the seed has no interactions).
+SEED_FILES = ("companies.csv", "people.csv", "jobs.csv", "stages.csv", "links.csv")
+
+
 def seed_database() -> str | None:
     """Load the synthetic demo data into a new database; return a message when it is refused."""
     # Checked before the database is opened: missing demo data is not a JOB_SEARCH_DB problem,
     # and no empty database file is left behind.
-    for name in ("jobs.csv", "contacts.csv"):
+    for name in SEED_FILES:
         try:
             (db.SEED_DIR / name).open(encoding="utf-8").close()
         except OSError as failure:
@@ -654,12 +660,34 @@ def seed_database() -> str | None:
                     f"The demo data only goes into a new database; point {db.DB_ENV_VAR} to "
                     "another file."
                 )
-        db.load_seed(connection)
+        transfer.load_seed(connection, db.SEED_DIR)
     return None
 
 
+def import_command(folder: str, apply: bool) -> int:
+    """Print the import report of a folder to stdout; write only with `apply`."""
+    # Checked before the database is opened, so a wrong folder leaves no database behind.
+    if not Path(folder).is_dir():
+        raise FileNotFoundError(f"Folder not found: {folder}")
+    with open_database() as connection:
+        report = transfer.import_folder(connection, Path(folder), today(), apply=apply)
+    print(report.to_text())
+    return 0
+
+
+def export_command(folder: str) -> int:
+    """Export the database to the CSV files of a folder and print what was written."""
+    with open_database() as connection:
+        counts = transfer.export_folder(connection, Path(folder))
+    for name, rows in counts.items():
+        print(f"{name}: {rows} rows")
+    print(f"Exported to {folder}.")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
-    """Command line entry point: run the server over stdio, or load the demo data and exit."""
+    """Command line entry point: run the server over stdio, load the demo data, or import
+    or export CSV files (the subcommands print their report to stdout and do not serve)."""
     parser = argparse.ArgumentParser(
         prog="job-search-mcp",
         description=(
@@ -673,6 +701,19 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="load the synthetic demo data into a new database and exit, without serving",
     )
+    commands = parser.add_subparsers(dest="command", metavar="{import,export}")
+    importing = commands.add_parser(
+        "import",
+        help="import the CSV files of a folder (docs/import-format.md); writes only with --apply",
+    )
+    importing.add_argument("folder", help="folder with the CSV files")
+    importing.add_argument(
+        "--apply", action="store_true", help="write the new rows (default: only the report)"
+    )
+    exporting = commands.add_parser(
+        "export", help="export the database to CSV files in a folder without those files"
+    )
+    exporting.add_argument("folder", help="folder for the CSV files (created when missing)")
     arguments = parser.parse_args(argv)
     try:
         config.load_settings()
@@ -680,6 +721,17 @@ def main(argv: list[str] | None = None) -> int:
         # Checked at startup, so a broken settings file is reported once, without traceback.
         print(failure, file=sys.stderr)
         return 1
+    if arguments.command is not None:
+        # A report with a name the console encoding lacks must not end in a traceback.
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(errors="replace")
+        try:
+            if arguments.command == "import":
+                return import_command(arguments.folder, arguments.apply)
+            return export_command(arguments.folder)
+        except (OSError, UnicodeDecodeError, csv.Error, sqlite3.Error) as failure:
+            print(f"Could not {arguments.command} {arguments.folder}: {failure}", file=sys.stderr)
+            return 1
     if arguments.seed:
         try:
             refusal = seed_database()

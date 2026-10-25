@@ -483,7 +483,7 @@ def test_use_case_2_records_a_stage_and_the_new_status_from_the_conversation(db_
     ]
     applied = structured("changes_confirm", proposal_id=proposal["id"])
     assert applied["stage"] == {
-        "id": 1,
+        "id": 10,  # after the 9 stages of the seed
         "kind": "technical",
         "date": "2026-03-16",
         "result": "pending",
@@ -634,7 +634,9 @@ def test_two_equal_stage_proposals_apply_only_once(db_path):
     duplicate = structured("jobs_add_stage", **stage)
     assert duplicate["error"] == "duplicate_stage"
     assert duplicate["stage"]["date"] == "2026-03-14"
-    assert rows(db_path, "SELECT COUNT(*) FROM application_stage") == [(1,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage WHERE application_id = 4") == [
+        (1,)
+    ]
 
 
 def test_stage_proposal_is_stale_when_the_application_changes(db_path):
@@ -643,7 +645,9 @@ def test_stage_proposal_is_stale_when_the_application_changes(db_path):
     ]
     assert "error" not in confirmed("update_job", job_id=4, source="user", next_step="Outro")
     assert structured("changes_confirm", proposal_id=stage["id"])["error"] == "stale_proposal"
-    assert rows(db_path, "SELECT COUNT(*) FROM application_stage") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage WHERE application_id = 4") == [
+        (0,)
+    ]
 
 
 def test_use_case_4_who_the_user_knows_at_a_company(db_path):
@@ -655,7 +659,12 @@ def test_use_case_4_who_the_user_knows_at_a_company(db_path):
     assert [person["name"] for person in overview["people"]] == ["Ana Exemplo"]
     assert [job["title"] for job in overview["applications"]] == ["Data Engineer"]
     assert structured("network_company_overview", company_id=99)["error"] == "not_found"
-    assert structured("network_list_companies", priority="A") == {"companies": []}
+    priority_a = structured("network_list_companies", priority="A")["companies"]
+    assert [company["name"] for company in priority_a] == [
+        "Transportadora Pampa",
+        "Usina Solaris",
+        "Financeira Colibri",
+    ]
     assert structured("network_list_companies", priority="X")["error"] == "invalid_input"
 
 
@@ -874,7 +883,7 @@ def test_seed_option_reports_missing_demo_data_without_blaming_the_database_path
     assert captured.out == ""
     assert captured.err.startswith("Could not read the demo data in")
     assert len(captured.err.strip().splitlines()) == 1
-    assert "jobs.csv" in captured.err
+    assert "companies.csv" in captured.err
     assert db.DB_ENV_VAR not in captured.err
     assert not path.exists()  # no empty database file is left behind
 
