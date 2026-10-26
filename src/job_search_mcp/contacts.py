@@ -1,70 +1,119 @@
-"""Contact operations: list contacts and log interactions, keeping the linked job in step."""
+"""Contact operations: list contacts, log interactions (keeping the linked applications in
+step) and plan the creation or change of a person.
+
+A contact is read with its company and keeps the keys of v0.1.0: `company` is the name of
+the company and `job_id` the job of the first application the person is linked to with the
+role 'contact' (null when there is none). `company_id` and `role_title` are additive.
+"""
 
 import datetime
 import sqlite3
 
-from job_search_mcp import domain, jobs
+from job_search_mcp import db, domain, history, jobs
+from job_search_mcp.config import DEFAULT_SETTINGS, Settings
 from job_search_mcp.db import to_date
 
-# Source written in job_history when an interaction moves the last contact date of a job.
+# Origin written in the history for the changes an interaction makes (contact and job).
+INTERACTION_SOURCE_TYPE = domain.USER_SOURCE
 INTERACTION_SOURCE = "contact_interaction"
 # The first logged conversation takes a contact out of "to contact", so it gets a follow-up.
 NOT_CONTACTED_STATUS = "to_contact"
 FIRST_INTERACTION_STATUS = "awaiting_reply"
 
+# Contact and company joined, with the keys (and their order) of v0.1.0.
+CONTACT_SELECT = """
+SELECT contact.id, contact.name, company.name AS company, contact.relationship,
+    contact.channel, contact.status, contact.next_step, contact.last_contact_on,
+    (
+        SELECT application.job_id FROM application_person
+        JOIN application ON application.id = application_person.application_id
+        WHERE application_person.contact_id = contact.id AND application_person.role = 'contact'
+        ORDER BY application.id LIMIT 1
+    ) AS job_id,
+    contact.company_id, contact.role_title
+FROM contact
+LEFT JOIN company ON company.id = contact.company_id
+"""
 
-def contact_to_dict(row: sqlite3.Row) -> dict:
-    """Turn a contact row into a plain dict, adding the calculated follow-up (ISO or None)."""
+
+def contact_to_dict(row: sqlite3.Row, settings: Settings | None = None) -> dict:
+    """Turn a contact row into a plain dict, adding the calculated follow-up (ISO or None).
+
+    The follow-up days come from `settings` (None: the defaults).
+    """
     contact = dict(row)
-    follow_up = domain.contact_follow_up(contact["last_contact_on"], contact["status"])
+    days = (settings or DEFAULT_SETTINGS).contact_follow_up_days
+    follow_up = domain.contact_follow_up(contact["last_contact_on"], contact["status"], days=days)
     contact["follow_up"] = follow_up.isoformat() if follow_up else None
     return contact
 
 
-def get_contact(connection: sqlite3.Connection, contact_id: int) -> dict | None:
-    row = connection.execute("SELECT * FROM contact WHERE id = ?", (contact_id,)).fetchone()
-    return contact_to_dict(row) if row else None
+def get_contact(
+    connection: sqlite3.Connection, contact_id: int, settings: Settings | None = None
+) -> dict | None:
+    row = connection.execute(f"{CONTACT_SELECT} WHERE contact.id = ?", (contact_id,)).fetchone()
+    return contact_to_dict(row, settings) if row else None
 
 
 def list_contacts(
     connection: sqlite3.Connection,
     status: str | None = None,
     company: str | None = None,
+    settings: Settings | None = None,
 ) -> list[dict] | dict:
     """List contacts ordered by id, optionally filtered by status and company.
 
-    The company filter matches the whole name, ignoring case for unaccented letters.
+    The company filter matches the whole name, compared by normalized name (db.normalize_name:
+    case, accents and extra spaces are ignored).
     """
     if status is not None and status not in domain.CONTACT_STATUSES:
         return domain.invalid_status(status, domain.CONTACT_STATUSES)
     conditions, parameters = [], []
-    for condition, value in (("status = ?", status), ("company = ? COLLATE NOCASE", company)):
+    for condition, value in (
+        ("contact.status = ?", status),
+        ("company.normalized_name = ?", db.normalize_name(company) if company else company),
+    ):
         if value is not None:
             conditions.append(condition)
             parameters.append(value)
     where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    rows = connection.execute(f"SELECT * FROM contact{where} ORDER BY id", parameters)
-    return [contact_to_dict(row) for row in rows]
+    rows = connection.execute(f"{CONTACT_SELECT}{where} ORDER BY contact.id", parameters)
+    return [contact_to_dict(row, settings) for row in rows]
 
 
-def log_interaction(
+def linked_job_ids(connection: sqlite3.Connection, contact_id: int) -> list[int]:
+    """Ids of the jobs whose application the person is linked to, in any role, by job id."""
+    rows = connection.execute(
+        "SELECT DISTINCT application.job_id FROM application_person"
+        " JOIN application ON application.id = application_person.application_id"
+        " WHERE application_person.contact_id = ? ORDER BY application.job_id",
+        (contact_id,),
+    )
+    return [row[0] for row in rows]
+
+
+def plan_log_interaction(
     connection: sqlite3.Connection,
     contact_id: int,
     summary: str,
     date: str | datetime.date,
     status: str | None = None,
     next_step: str | None = None,
-) -> dict:
-    """Record an interaction with a contact and refresh its follow-up.
+    settings: Settings | None = None,
+) -> domain.Plan | dict:
+    """Plan the record of an interaction with a contact, without writing anything.
 
-    Updates the last contact date of the contact and, when informed, its status and next
-    step. A contact in to_contact logged without a status moves to awaiting_reply, so it
-    starts to have a follow-up; an informed status always prevails. If the contact is
-    linked to a job, the last contact date of the job is updated
-    too, with a job_history line. A last contact date never moves backwards: logging an
-    older interaction keeps the more recent date. Returns the updated contact, its new
-    follow-up and the linked job (None when there is none), or a structured error without
-    changing anything.
+    The plan adds the interaction and updates the last contact date of the contact and,
+    when informed, its status and next step. A contact in to_contact logged without a
+    status moves to awaiting_reply, so it starts to have a follow-up; an informed status
+    always prevails. The last contact date of every active application (status not
+    closed) the person is linked to, in any role, is updated too. Every field that
+    changes, of the contact or of an application, gets a history line. A last contact date
+    never moves backwards: logging an older interaction keeps the more recent date. The
+    plan depends on the versions of the contact and of each active linked application;
+    applying it returns the updated contact, its new follow-up, `job` (the linked job when
+    the person is linked to exactly one, otherwise None) and `jobs` (every linked job, by
+    id). Errors are structured and nothing is planned.
     """
     if not summary or not summary.strip():
         return domain.error("invalid_input", "Field 'summary' is required.")
@@ -74,7 +123,7 @@ def log_interaction(
         interaction_date = None
     if interaction_date is None:
         return domain.invalid_date("date", date)
-    contact = get_contact(connection, contact_id)
+    contact = get_contact(connection, contact_id, settings)
     if contact is None:
         return domain.not_found("contact", contact_id)
     if status is not None and status not in domain.CONTACT_STATUSES:
@@ -84,32 +133,181 @@ def log_interaction(
         status = FIRST_INTERACTION_STATUS
 
     interaction_on = interaction_date.isoformat()
-    job = jobs.get_job(connection, contact["job_id"]) if contact["job_id"] else None
-    with connection:
+    interaction = {"contact_id": contact_id, "date": interaction_on, "summary": summary.strip()}
+    contact_changes = {
+        "last_contact_on": max(interaction_on, contact["last_contact_on"] or ""),
+        "status": status if status is not None else contact["status"],
+        "next_step": next_step if next_step is not None else contact["next_step"],
+    }
+    changes = history.creation("interaction", interaction)
+    changes += history.diff("contact", contact_id, contact, contact_changes)
+    base_versions = {
+        f"contact:{contact_id}": history.read_version(connection, "contact", contact_id)
+    }
+    job_ids = linked_job_ids(connection, contact_id)
+    to_update = []
+    for job_id in job_ids:
+        job = jobs.get_job(connection, job_id, settings)
+        if job["status"] in domain.JOB_CLOSED_STATUSES:
+            continue
+        application_id = jobs.application_id(connection, job_id)
+        base_versions[f"application:{application_id}"] = history.read_version(
+            connection, "application", application_id
+        )
+        if interaction_on > (job["last_contact_on"] or ""):
+            to_update.append(job)
+            changes += history.diff(
+                "application", application_id, job, {"last_contact_on": interaction_on}
+            )
+
+    def apply() -> dict:
         connection.execute(
             "INSERT INTO interaction (contact_id, date, summary) VALUES (?, ?, ?)",
-            (contact_id, interaction_on, summary.strip()),
+            (contact_id, interaction_on, interaction["summary"]),
         )
-        connection.execute(
-            "UPDATE contact SET last_contact_on = ?, status = ?, next_step = ? WHERE id = ?",
-            (
-                max(interaction_on, contact["last_contact_on"] or ""),
-                status if status is not None else contact["status"],
-                next_step if next_step is not None else contact["next_step"],
-                contact_id,
-            ),
+        history.record_changes(
+            connection,
+            "contact",
+            contact_id,
+            contact,
+            contact_changes,
+            interaction_date,
+            INTERACTION_SOURCE_TYPE,
+            INTERACTION_SOURCE,
         )
-        if job and interaction_on > (job["last_contact_on"] or ""):
+        for job in to_update:
             jobs.apply_job_changes(
                 connection,
                 job,
                 {"last_contact_on": interaction_on},
+                INTERACTION_SOURCE_TYPE,
                 INTERACTION_SOURCE,
                 interaction_date,
             )
-    contact = get_contact(connection, contact_id)
-    return {
-        "contact": contact,
-        "follow_up": contact["follow_up"],
-        "job": jobs.get_job(connection, job["id"]) if job else None,
+        updated = get_contact(connection, contact_id, settings)
+        linked = [jobs.get_job(connection, job_id, settings) for job_id in job_ids]
+        return {
+            "contact": updated,
+            "follow_up": updated["follow_up"],
+            "job": linked[0] if len(linked) == 1 else None,
+            "jobs": linked,
+        }
+
+    return domain.Plan(changes=changes, base_versions=base_versions, apply=apply)
+
+
+def plan_save_person(
+    connection: sqlite3.Connection,
+    name: str | None = None,
+    contact_id: int | None = None,
+    company: str | None = None,
+    role_title: str | None = None,
+    relationship: str | None = None,
+    channel: str | None = None,
+    status: str | None = None,
+    next_step: str | None = None,
+    *,
+    source: str,
+    reference_date: str | datetime.date,
+    settings: Settings | None = None,
+) -> domain.Plan | dict:
+    """Plan the creation of a person (no `contact_id`) or the change of one, writing nothing.
+
+    The name is required to create and optional in a change. A company is given by name
+    and found by normalized name (db.normalize_name); when no company has it, the plan
+    creates the company too. A new
+    person without a status starts in to_contact. In a change, fields left as None (or
+    blank) are not touched; on_hold takes the person out of the follow-ups. `source` and
+    `reference_date` go to the history, one line per created or changed field (the company
+    of a person is recorded by name). A change depends on the version of the contact;
+    applying the plan returns {"contact": the saved contact}.
+    """
+    name = domain.optional_text(name)
+    if name is None and contact_id is None:
+        return domain.error("invalid_input", "Field 'name' is required to create a person.")
+    if status is not None and status not in domain.CONTACT_STATUSES:
+        return domain.invalid_status(status, domain.CONTACT_STATUSES)
+    origin = jobs.parse_source(source)
+    if domain.is_error(origin):
+        return origin
+    changed_on = jobs.parse_reference_date("reference_date", reference_date)
+    if domain.is_error(changed_on):
+        return changed_on
+    current = None
+    if contact_id is not None:
+        current = get_contact(connection, contact_id, settings)
+        if current is None:
+            return domain.not_found("contact", contact_id)
+    company_name = domain.optional_text(company)
+    new_company = False
+    if company_name is not None:
+        stored = connection.execute(
+            "SELECT name FROM company WHERE normalized_name = ?", (db.normalize_name(company_name),)
+        ).fetchone()
+        new_company = stored is None
+        company_name = company_name if new_company else stored["name"]
+    if status is None and current is None:
+        status = NOT_CONTACTED_STATUS
+    informed = {
+        "name": name,
+        "company": company_name,
+        "role_title": domain.optional_text(role_title),
+        "relationship": domain.optional_text(relationship),
+        "channel": domain.optional_text(channel),
+        "status": status,
+        "next_step": domain.optional_text(next_step),
     }
+    values = {field: value for field, value in informed.items() if value is not None}
+    changes = history.creation("company", {"name": company_name}) if new_company else []
+
+    def company_id() -> int | None:
+        found = db.ensure_company(connection, company_name)
+        if new_company:
+            history.record_creation(
+                connection, "company", found, {"name": company_name}, changed_on, *origin
+            )
+        return found
+
+    if current is None:
+
+        def create() -> dict:
+            new_id = connection.execute(
+                "INSERT INTO contact (name, company_id, role_title, relationship, channel,"
+                " status, next_step) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    name,
+                    company_id(),
+                    informed["role_title"],
+                    informed["relationship"],
+                    informed["channel"],
+                    status,
+                    informed["next_step"],
+                ),
+            ).lastrowid
+            history.record_creation(connection, "contact", new_id, values, changed_on, *origin)
+            return {"contact": get_contact(connection, new_id, settings)}
+
+        changes += history.creation("contact", values)
+        return domain.Plan(changes=changes, base_versions={}, apply=create)
+
+    def update() -> dict:
+        history.record_changes(
+            connection,
+            "contact",
+            contact_id,
+            current,
+            values,
+            changed_on,
+            *origin,
+            references={"company": company_id()},
+        )
+        return {"contact": get_contact(connection, contact_id, settings)}
+
+    changes += history.diff("contact", contact_id, current, values)
+    return domain.Plan(
+        changes=changes,
+        base_versions={
+            f"contact:{contact_id}": history.read_version(connection, "contact", contact_id)
+        },
+        apply=update,
+    )

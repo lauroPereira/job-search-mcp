@@ -5,7 +5,7 @@ import sqlite3
 import subprocess
 import sys
 import sysconfig
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -16,14 +16,25 @@ from job_search_mcp import db, server, summary
 
 TOOL_NAMES = [
     "add_job",
+    "changes_confirm",
+    "changes_discard",
+    "changes_list_pending",
     "daily_summary",
+    "jobs_add_stage",
+    "jobs_funnel_metrics",
+    "jobs_link_person",
     "list_contacts",
     "list_jobs",
     "log_interaction",
+    "network_company_overview",
+    "network_list_companies",
+    "network_save_company",
+    "network_save_person",
     "pending_followups",
     "update_job",
 ]
 TODAY = date(2026, 3, 16)
+NOW = datetime(2026, 3, 16, 12, 0, tzinfo=UTC)
 
 
 @pytest.fixture
@@ -32,6 +43,7 @@ def db_path(tmp_path, monkeypatch):
     path = tmp_path / "job_search_server_test.db"
     monkeypatch.setenv(db.DB_ENV_VAR, str(path))
     monkeypatch.setattr(server, "today", lambda: TODAY)
+    monkeypatch.setattr(server, "now", lambda: NOW)
     assert server.seed_database() is None
     return path
 
@@ -46,17 +58,45 @@ def run(action, transport=None):
     return asyncio.run(session())
 
 
-def call(name, **arguments):
+def call(name, /, **arguments):
     """Call a tool through the in-memory client and return the raw result."""
     return run(lambda client: client.call_tool(name, arguments, raise_on_error=False))
 
 
-def structured(name, **arguments):
+def structured(name, /, **arguments):
     """Call a tool and return its structured content, checking it is not a protocol error."""
     result = call(name, **arguments)
     assert result.is_error is False
     assert isinstance(result.structured_content, dict)
     return result.structured_content
+
+
+def confirmed(name, /, **arguments):
+    """Call a write tool and confirm its proposal; a structured error is returned as it is."""
+    result = structured(name, **arguments)
+    if "error" in result:
+        return result
+    assert list(result) == ["proposal"]
+    return structured("changes_confirm", proposal_id=result["proposal"]["id"])
+
+
+def snapshot(path):
+    """Every row of every table except proposal: what a proposal must leave untouched."""
+    connection = sqlite3.connect(path)
+    try:
+        tables = [
+            row[0]
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+                " AND name NOT LIKE 'sqlite_%' AND name != 'proposal' ORDER BY name"
+            )
+        ]
+        return {
+            table: connection.execute(f"SELECT * FROM {table} ORDER BY rowid").fetchall()
+            for table in tables
+        }
+    finally:
+        connection.close()
 
 
 def rows(path, query):
@@ -67,7 +107,7 @@ def rows(path, query):
         connection.close()
 
 
-def test_server_lists_exactly_the_seven_tools(db_path):
+def test_server_lists_exactly_the_seventeen_tools(db_path):
     tools = run(lambda client: client.list_tools())
     assert sorted(tool.name for tool in tools) == TOOL_NAMES
     assert server.mcp.name == "job-search"
@@ -83,12 +123,58 @@ def test_tool_parameters_match_the_plan(db_path):
     parameters = {name: sorted(tool.input_schema["properties"]) for name, tool in tools.items()}
     assert parameters == {
         "list_jobs": ["min_score", "status", "track"],
-        "add_job": ["company", "next_step", "score", "title", "track", "url"],
-        "update_job": ["applied_on", "job_id", "last_contact_on", "next_step", "source", "status"],
+        "add_job": ["company", "next_step", "score", "source", "title", "track", "url"],
+        "update_job": [
+            "applied_on",
+            "contract_type",
+            "job_id",
+            "last_contact_on",
+            "next_step",
+            "resume_track",
+            "salary_ask",
+            "source",
+            "status",
+        ],
         "list_contacts": ["company", "status"],
         "log_interaction": ["contact_id", "date", "next_step", "status", "summary"],
         "pending_followups": ["days_ahead", "reference_date"],
         "daily_summary": ["deadline", "reference_date"],
+        "changes_confirm": ["proposal_id"],
+        "changes_discard": ["proposal_id"],
+        "changes_list_pending": [],
+        "network_list_companies": ["priority"],
+        "network_company_overview": ["company_id"],
+        "network_save_company": [
+            "company_id",
+            "job_platform",
+            "name",
+            "notes",
+            "priority",
+            "sector",
+            "source",
+        ],
+        "network_save_person": [
+            "channel",
+            "company",
+            "contact_id",
+            "name",
+            "next_step",
+            "relationship",
+            "role_title",
+            "source",
+            "status",
+        ],
+        "jobs_add_stage": [
+            "date",
+            "feedback",
+            "job_id",
+            "kind",
+            "result",
+            "source",
+            "status",
+        ],
+        "jobs_link_person": ["confirmed", "contact_id", "job_id", "role", "source"],
+        "jobs_funnel_metrics": ["reference_date", "weeks"],
     }
     required = {name: sorted(tool.input_schema.get("required", [])) for name, tool in tools.items()}
     assert required == {
@@ -99,13 +185,26 @@ def test_tool_parameters_match_the_plan(db_path):
         "log_interaction": ["contact_id", "summary"],
         "pending_followups": [],
         "daily_summary": [],
+        "changes_confirm": ["proposal_id"],
+        "changes_discard": ["proposal_id"],
+        "changes_list_pending": [],
+        "network_list_companies": [],
+        "network_company_overview": ["company_id"],
+        "network_save_company": ["source"],
+        "network_save_person": ["source"],
+        "jobs_add_stage": ["date", "job_id", "kind", "source"],
+        "jobs_link_person": ["contact_id", "job_id", "role", "source"],
+        "jobs_funnel_metrics": [],
     }
     days_ahead = tools["pending_followups"].input_schema["properties"]["days_ahead"]
     assert days_ahead["type"] == "integer"
     assert days_ahead["default"] == 2
+    weeks = tools["jobs_funnel_metrics"].input_schema["properties"]["weeks"]
+    assert weeks["type"] == "integer"
+    assert weeks["default"] == 4
 
 
-def test_only_the_four_query_tools_carry_the_read_only_hint(db_path):
+def test_only_the_query_tools_carry_the_read_only_hint(db_path):
     tools = {tool.name: tool for tool in run(lambda client: client.list_tools())}
     read_only = {
         name: getattr(tool.annotations, "read_only_hint", None) for name, tool in tools.items()
@@ -118,6 +217,16 @@ def test_only_the_four_query_tools_carry_the_read_only_hint(db_path):
         "add_job": None,
         "update_job": None,
         "log_interaction": None,
+        "changes_list_pending": True,
+        "changes_confirm": None,
+        "changes_discard": None,
+        "network_list_companies": True,
+        "network_company_overview": True,
+        "network_save_company": None,
+        "network_save_person": None,
+        "jobs_add_stage": None,
+        "jobs_link_person": None,
+        "jobs_funnel_metrics": True,
     }
 
 
@@ -146,6 +255,56 @@ def test_daily_summary_accepts_reference_date_and_deadline_as_iso_text(db_path):
     assert structured("daily_summary", deadline="fim do mês")["error"] == "invalid_date"
 
 
+def test_use_case_6_funnel_of_the_week(db_path, tmp_path, monkeypatch):
+    """The agent asks for the funnel: by status, interview rate, overdue and deadline."""
+    before = snapshot(db_path)
+    result = structured("jobs_funnel_metrics")  # today (2026-03-16) and 4 weeks by default
+    connection = db.connect(db_path)
+    try:
+        expected = summary.funnel_metrics(connection, TODAY)
+    finally:
+        connection.close()
+    assert result == expected
+    # Hand counts over the seed, explained in test_summary.py.
+    assert result["active_total"] == 11
+    assert result["active_by_status"]["applied"] == 2
+    assert result["in_interview"] == 3
+    assert result["queue"]["total"] == 4
+    assert result["in_progress"]["total"] == 7
+    assert result["in_progress"]["with_referral"] == 1
+    assert result["interview_rate"] == {"reached_interview": 6, "applied": 10, "rate": 0.6}
+    assert [week["applications"] for week in result["applications_per_week"]] == [1, 2, 1, 0]
+    assert result["applications_per_week"][-1]["partial"] is True
+    assert result["follow_ups"]["overdue"] == {"jobs": 2, "contacts": 2}
+    assert result["days_to_deadline"] is None
+    assert result["goals"] == {"applications_per_week": None, "interview_rate": None}
+    assert snapshot(db_path) == before  # a read tool: nothing written
+
+    settings = tmp_path / "settings.toml"
+    settings.write_text(
+        '[goals]\ndeadline = "2026-03-31"\napplications_per_week = 5\ninterview_rate = 0.4\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("JOB_SEARCH_CONFIG", str(settings))
+    with_goals = structured("jobs_funnel_metrics", reference_date="2026-03-20", weeks=2)
+    assert with_goals["reference_date"] == "2026-03-20"
+    assert with_goals["deadline"] == "2026-03-31"
+    assert with_goals["days_to_deadline"] == 11
+    assert with_goals["goals"] == {"applications_per_week": 5, "interview_rate": 0.4}
+    assert [week["week"] for week in with_goals["applications_per_week"]] == [
+        "2026-W11",
+        "2026-W12",
+    ]
+
+
+def test_jobs_funnel_metrics_rejects_invalid_date_and_weeks(db_path):
+    assert structured("jobs_funnel_metrics", reference_date="hoje")["error"] == "invalid_date"
+    for weeks in (0, 53):
+        result = structured("jobs_funnel_metrics", weeks=weeks)
+        assert result["error"] == "invalid_input"
+        assert "weeks" in result["detail"]
+
+
 def test_pending_followups_defaults_to_today_and_two_days_ahead(db_path):
     result = structured("pending_followups")
     assert result["reference_date"] == "2026-03-16"
@@ -171,7 +330,7 @@ def test_pending_followups_rejects_negative_days_ahead_and_invalid_date(db_path)
 
 def test_add_job_then_list_jobs(db_path):
     url = "https://vagas.example.com/empresa-exemplo/data-engineer"
-    created = structured(
+    created = confirmed(
         "add_job", company="Empresa Exemplo", title="Data Engineer", url=url, track="data", score=8
     )
     assert created["id"] == 16
@@ -205,7 +364,7 @@ def test_add_job_rejects_invalid_track_and_score_as_structured_errors(db_path):
         assert result["error"] == "invalid_input"
         assert "score" in result["detail"]
     assert rows(db_path, "SELECT COUNT(*) FROM job") == [(15,)]
-    created = structured("add_job", **job, track="other", score=10)
+    created = confirmed("add_job", **job, track="other", score=10)
     assert (created["track"], created["score"]) == ("other", 10)
 
 
@@ -220,12 +379,12 @@ def test_invalid_status_arrives_as_a_structured_error_with_the_valid_ones(db_pat
         assert result["error"] == "invalid_status"
         assert valid in result["valid_statuses"]
         assert valid in result["detail"]
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
     assert rows(db_path, "SELECT COUNT(*) FROM interaction") == [(0,)]
 
 
 def test_update_job_writes_history_dated_today(db_path):
-    result = structured(
+    result = confirmed(
         "update_job", job_id=8, source="user", status="applied", next_step="Aguardar triagem"
     )
     assert result["job"]["status"] == "applied"
@@ -240,13 +399,61 @@ def test_update_job_writes_history_dated_today(db_path):
     }
     assert all(line["date"] == "2026-03-16" for line in result["history"])
     assert all(line["source"] == "user" for line in result["history"])
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(3,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(3,)]
+
+
+def test_update_job_proposes_and_records_what_was_sent_with_the_application(db_path):
+    before = snapshot(db_path)
+    proposal = structured(
+        "update_job",
+        job_id=2,
+        source="conversation",
+        resume_track="data",
+        salary_ask="a combinar",
+        contract_type="CLT",
+    )["proposal"]
+    assert snapshot(db_path) == before
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in proposal["changes"]] == [
+        ("resume_track", None, "data"),
+        ("salary_ask", None, "a combinar"),
+        ("contract_type", None, "CLT"),
+    ]
+    result = structured("changes_confirm", proposal_id=proposal["id"])
+    job = result["job"]
+    assert (job["resume_track"], job["salary_ask"], job["contract_type"]) == (
+        "data",
+        "a combinar",
+        "CLT",
+    )
+    assert rows(
+        db_path,
+        "SELECT field, source_type FROM history WHERE entity = 'application' ORDER BY id",
+    ) == [
+        ("resume_track", "conversation"),
+        ("salary_ask", "conversation"),
+        ("contract_type", "conversation"),
+    ]
+    listed = structured("list_jobs", status="applied")["jobs"]
+    assert [(j["id"], j["resume_track"]) for j in listed] == [(1, None), (2, "data")]
+
+
+def test_update_job_refuses_a_resume_track_outside_the_tracks(db_path):
+    before = snapshot(db_path)
+    result = structured("update_job", job_id=2, source="user", resume_track="dados")
+    assert result["error"] == "invalid_input"
+    assert result["valid_values"] == ["data", "systems", "product", "ai", "other"]
+    for arguments in ({"salary_ask": "  "}, {"contract_type": "x" * 101}):
+        assert structured("update_job", job_id=2, source="user", **arguments)["error"] == (
+            "invalid_input"
+        )
+    assert snapshot(db_path) == before
+    assert structured("changes_list_pending") == {"proposals": []}
 
 
 def test_update_job_does_not_expose_reference_date(db_path):
     result = call("update_job", job_id=8, source="user", reference_date="2026-01-01")
     assert result.is_error is True
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
 
 
 def test_update_job_rejects_future_and_invalid_dates(db_path):
@@ -258,13 +465,13 @@ def test_update_job_rejects_future_and_invalid_dates(db_path):
         invalid = structured("update_job", job_id=1, source="user", **{field: "ontem"})
         assert invalid["error"] == "invalid_date"
         assert field in invalid["detail"]
-    assert rows(db_path, "SELECT COUNT(*) FROM job_history") == [(0,)]
-    today = structured("update_job", job_id=1, source="user", last_contact_on="2026-03-16")
+    assert rows(db_path, "SELECT COUNT(*) FROM history") == [(0,)]
+    today = confirmed("update_job", job_id=1, source="user", last_contact_on="2026-03-16")
     assert today["job"]["last_contact_on"] == "2026-03-16"
 
 
 def test_log_interaction_updates_the_contact_and_the_linked_job(db_path):
-    result = structured("log_interaction", contact_id=1, summary="Respondeu sobre a indicação")
+    result = confirmed("log_interaction", contact_id=1, summary="Respondeu sobre a indicação")
     assert result["contact"]["last_contact_on"] == "2026-03-16"  # defaults to today
     assert result["follow_up"] == "2026-03-22"
     assert result["job"]["id"] == 1
@@ -272,7 +479,7 @@ def test_log_interaction_updates_the_contact_and_the_linked_job(db_path):
     assert rows(db_path, "SELECT contact_id, date, summary FROM interaction") == [
         (1, "2026-03-16", "Respondeu sobre a indicação")
     ]
-    dated = structured(
+    dated = confirmed(
         "log_interaction",
         contact_id=8,
         summary="Primeira mensagem",
@@ -294,6 +501,391 @@ def test_log_interaction_rejects_future_and_invalid_dates(db_path):
     )
     assert structured("log_interaction", contact_id=99, summary="x")["error"] == "not_found"
     assert rows(db_path, "SELECT COUNT(*) FROM interaction") == [(0,)]
+
+
+WRITES = (
+    (
+        "add_job",
+        {"company": "Empresa Nova", "title": "Data Engineer", "url": "https://x.example/1"},
+    ),
+    ("update_job", {"job_id": 8, "source": "email", "status": "applied"}),
+    (
+        "update_job",
+        {"job_id": 2, "source": "conversation", "resume_track": "data", "salary_ask": "a combinar"},
+    ),
+    ("log_interaction", {"contact_id": 1, "summary": "Respondeu sobre a indicação"}),
+    ("network_save_company", {"name": "Empresa Nova", "source": "user", "priority": "C"}),
+    (
+        "network_save_person",
+        {"name": "Iara Nova", "company": "Empresa Zeta", "source": "conversation"},
+    ),
+    (
+        "network_save_person",
+        {"contact_id": 7, "name": "Gabriela Ensaio", "source": "user", "status": "on_hold"},
+    ),
+    (
+        "jobs_add_stage",
+        {"job_id": 4, "kind": "technical", "date": "2026-03-16", "source": "conversation"},
+    ),
+    (
+        "jobs_add_stage",
+        {
+            "job_id": 4,
+            "kind": "hr",
+            "date": "2026-03-12",
+            "result": "passed",
+            "status": "tech_interview",
+            "source": "user",
+        },
+    ),
+    ("jobs_link_person", {"job_id": 9, "contact_id": 7, "role": "referrer", "source": "user"}),
+    (
+        "jobs_link_person",
+        {"job_id": 1, "contact_id": 2, "role": "recruiter", "confirmed": True, "source": "user"},
+    ),
+)
+
+
+@pytest.mark.parametrize(("name", "arguments"), WRITES)
+def test_write_tools_only_propose_and_changes_confirm_applies(db_path, name, arguments):
+    before = snapshot(db_path)
+    result = structured(name, **arguments)
+    assert snapshot(db_path) == before
+    proposal = result["proposal"]
+    assert sorted(proposal) == ["changes", "expires_at", "id", "tool"]
+    assert proposal["tool"] == name
+    assert proposal["expires_at"] == "2026-03-17 12:00:00"  # 24 hours by default
+    assert proposal["changes"]
+    for change in proposal["changes"]:
+        assert sorted(change) == ["entity", "field", "new_value", "old_value", "record_id"]
+    pending = structured("changes_list_pending")["proposals"]
+    assert [(item["id"], item["changes"]) for item in pending] == [
+        (proposal["id"], proposal["changes"])
+    ]
+    assert snapshot(db_path) == before
+
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert "error" not in applied
+    assert snapshot(db_path) != before
+    assert rows(db_path, "SELECT COUNT(*) FROM history WHERE source_type IS NULL") == [(0,)]
+    assert rows(db_path, "SELECT COUNT(*) FROM history")[0][0] > 0
+    assert structured("changes_list_pending") == {"proposals": []}
+    again = structured("changes_confirm", proposal_id=proposal["id"])
+    assert again["error"] == "not_found"
+    assert again["status"] == "applied"
+
+
+def test_use_case_2_records_a_stage_and_the_new_status_from_the_conversation(db_path):
+    """ "Fiz a entrevista técnica hoje, foi bem, aguardo retorno", on the seed job 4."""
+    before = snapshot(db_path)
+    proposal = structured(
+        "jobs_add_stage",
+        job_id=4,
+        kind="technical",
+        date="2026-03-16",
+        feedback="Foi bem, aguardo retorno",
+        status="tech_interview",
+        source="conversation",
+    )["proposal"]
+    assert snapshot(db_path) == before
+    assert [
+        (change["entity"], change["field"], change["old_value"], change["new_value"])
+        for change in proposal["changes"]
+    ] == [
+        ("application_stage", "application_id", None, 4),
+        ("application_stage", "kind", None, "technical"),
+        ("application_stage", "date", None, "2026-03-16"),
+        ("application_stage", "result", None, "pending"),
+        ("application_stage", "feedback", None, "Foi bem, aguardo retorno"),
+        ("application", "status", "hr_interview", "tech_interview"),
+        ("application", "last_contact_on", "2026-03-13", "2026-03-16"),
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["stage"] == {
+        "id": 10,  # after the 9 stages of the seed
+        "kind": "technical",
+        "date": "2026-03-16",
+        "result": "pending",
+        "feedback": "Foi bem, aguardo retorno",
+    }
+    assert applied["job"]["status"] == "tech_interview"
+    assert [line["field"] for line in applied["history"]] == ["status", "last_contact_on"]
+    listed = structured("list_jobs", status="tech_interview")["jobs"]
+    job = next(item for item in listed if item["id"] == 4)
+    assert job["stages"] == [applied["stage"]]
+    assert job["last_contact_on"] == "2026-03-16"
+    assert rows(db_path, "SELECT DISTINCT entity, source_type FROM history ORDER BY entity") == [
+        ("application", "conversation"),
+        ("application_stage", "conversation"),
+    ]
+
+
+def test_use_case_3_a_refused_proposal_changes_nothing(db_path):
+    """The agent proposes 'referred' for a contact; the user refuses."""
+    before = snapshot(db_path)
+    proposal = structured(
+        "network_save_person", contact_id=1, status="referred", source="conversation"
+    )["proposal"]
+    assert [(c["field"], c["old_value"], c["new_value"]) for c in proposal["changes"]] == [
+        ("status", "awaiting_reply", "referred")
+    ]
+    assert structured("changes_discard", proposal_id=proposal["id"])["proposal"]["status"] == (
+        "discarded"
+    )
+    assert snapshot(db_path) == before
+    assert structured("changes_confirm", proposal_id=proposal["id"])["error"] == "not_found"
+    assert snapshot(db_path) == before
+    assert structured("list_contacts", status="referred")["contacts"][0]["id"] == 4
+
+
+def test_jobs_add_stage_refuses_future_dates_and_invalid_values(db_path):
+    before = snapshot(db_path)
+    stage = {"job_id": 4, "source": "user"}
+    future = structured("jobs_add_stage", **stage, kind="technical", date="2026-03-17")
+    assert future["error"] == "invalid_date"
+    assert "after today" in future["detail"]
+    assert structured("jobs_add_stage", **stage, kind="hr", date="ontem")["error"] == (
+        "invalid_date"
+    )
+    kind = structured("jobs_add_stage", **stage, kind="lunch", date="2026-03-16")
+    assert kind["error"] == "invalid_input"
+    assert kind["valid_values"] == [
+        "screening", "test", "culture_fit", "hr", "technical", "manager", "offer"
+    ]  # fmt: skip
+    result = structured("jobs_add_stage", **stage, kind="hr", date="2026-03-16", result="ok")
+    assert result["valid_values"] == ["pending", "passed", "failed", "cancelled"]
+    status = structured("jobs_add_stage", **stage, kind="hr", date="2026-03-16", status="x")
+    assert status["error"] == "invalid_status"
+    assert (
+        structured("jobs_add_stage", job_id=99, kind="hr", date="2026-03-16", source="user")[
+            "error"
+        ]
+        == "not_found"
+    )
+    assert structured("changes_list_pending") == {"proposals": []}
+    assert snapshot(db_path) == before
+
+
+def test_jobs_link_person_refuses_a_repeated_link_and_confirms_an_existing_one(db_path):
+    link = {"job_id": 3, "contact_id": 7, "role": "referrer", "source": "conversation"}
+    assert structured("list_jobs", status="in_review")["jobs"][0]["priority"] == "medium"
+    created = confirmed("jobs_link_person", **link)
+    assert created["link"] == {
+        "job_id": 3,
+        "contact_id": 7,
+        "name": "Gabriela Ensaio",
+        "role": "referrer",
+        "confirmed": False,
+    }
+    assert created["job"]["people"] == [
+        {"id": 7, "name": "Gabriela Ensaio", "role": "referrer", "confirmed": False}
+    ]
+    assert created["job"]["priority"] == "medium"  # score 7.0, referral not confirmed
+    before = snapshot(db_path)
+    repeated = structured("jobs_link_person", **link)
+    assert repeated["error"] == "duplicate_link"
+    assert repeated["link"]["confirmed"] is False
+    assert structured("jobs_link_person", **link, confirmed=False)["error"] == "duplicate_link"
+    bad_role = structured("jobs_link_person", **{**link, "role": "friend"})
+    assert bad_role["error"] == "invalid_input"
+    assert structured("jobs_link_person", **{**link, "contact_id": 99})["error"] == "not_found"
+    assert snapshot(db_path) == before
+
+    proposal = structured("jobs_link_person", **link, confirmed=True)["proposal"]
+    assert proposal["changes"] == [
+        {
+            "entity": "application_person",
+            "record_id": 3,
+            "field": "link",
+            "old_value": "Gabriela Ensaio (contact 7) as referrer, not confirmed",
+            "new_value": "Gabriela Ensaio (contact 7) as referrer, confirmed",
+        }
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["link"]["confirmed"] is True
+    assert applied["job"]["priority"] == "high"
+    assert structured("jobs_link_person", **link, confirmed=True)["error"] == "duplicate_link"
+    assert rows(
+        db_path,
+        "SELECT entity, record_id, field, old_value, new_value, source_type FROM history",
+    ) == [
+        (
+            "application_person",
+            3,
+            "link",
+            None,
+            "contact_id=7;role=referrer;confirmed=0",
+            "conversation",
+        ),
+        (
+            "application_person",
+            3,
+            "link",
+            "contact_id=7;role=referrer;confirmed=0",
+            "contact_id=7;role=referrer;confirmed=1",
+            "conversation",
+        ),
+    ]
+
+
+def test_log_interaction_updates_every_active_job_of_the_person(db_path):
+    assert "error" not in confirmed(
+        "jobs_link_person", job_id=3, contact_id=1, role="referrer", confirmed=True, source="user"
+    )
+    result = confirmed("log_interaction", contact_id=1, summary="Conversa sobre as duas vagas")
+    assert sorted(result) == ["contact", "follow_up", "job", "jobs"]
+    assert result["job"] is None  # linked to two jobs
+    assert [(job["id"], job["last_contact_on"]) for job in result["jobs"]] == [
+        (1, "2026-03-16"),
+        (3, "2026-03-16"),
+    ]
+    single = confirmed("log_interaction", contact_id=2, summary="Combinou horários")
+    assert single["job"]["id"] == 2
+    assert [job["id"] for job in single["jobs"]] == [2]
+
+
+def test_two_equal_stage_proposals_apply_only_once(db_path):
+    stage = {"job_id": 4, "kind": "hr", "date": "2026-03-14", "source": "user"}
+    first = structured("jobs_add_stage", **stage)["proposal"]
+    second = structured("jobs_add_stage", **stage)["proposal"]
+    assert "error" not in structured("changes_confirm", proposal_id=first["id"])
+    assert structured("changes_confirm", proposal_id=second["id"])["error"] == "stale_proposal"
+    duplicate = structured("jobs_add_stage", **stage)
+    assert duplicate["error"] == "duplicate_stage"
+    assert duplicate["stage"]["date"] == "2026-03-14"
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage WHERE application_id = 4") == [
+        (1,)
+    ]
+
+
+def test_stage_proposal_is_stale_when_the_application_changes(db_path):
+    stage = structured("jobs_add_stage", job_id=4, kind="hr", date="2026-03-14", source="user")[
+        "proposal"
+    ]
+    assert "error" not in confirmed("update_job", job_id=4, source="user", next_step="Outro")
+    assert structured("changes_confirm", proposal_id=stage["id"])["error"] == "stale_proposal"
+    assert rows(db_path, "SELECT COUNT(*) FROM application_stage WHERE application_id = 4") == [
+        (0,)
+    ]
+
+
+def test_use_case_4_who_the_user_knows_at_a_company(db_path):
+    listed = structured("network_list_companies")["companies"]
+    aurora = next(company for company in listed if company["name"] == "Banco Aurora")
+    assert aurora["suggested_priority"] == "A"
+    overview = structured("network_company_overview", company_id=aurora["id"])
+    assert overview["company"] == aurora
+    assert [person["name"] for person in overview["people"]] == ["Ana Exemplo"]
+    assert [job["title"] for job in overview["applications"]] == ["Data Engineer"]
+    assert structured("network_company_overview", company_id=99)["error"] == "not_found"
+    priority_a = structured("network_list_companies", priority="A")["companies"]
+    assert [company["name"] for company in priority_a] == [
+        "Transportadora Pampa",
+        "Usina Solaris",
+        "Financeira Colibri",
+    ]
+    assert structured("network_list_companies", priority="X")["error"] == "invalid_input"
+
+
+def test_use_case_5_on_hold_takes_the_person_out_of_the_follow_ups(db_path):
+    def contact_ids():
+        return [item["id"] for item in structured("pending_followups")["contacts"]]
+
+    assert 1 in contact_ids()
+    applied = confirmed(
+        "network_save_person",
+        contact_id=1,
+        status="on_hold",
+        source="conversation",
+    )
+    assert applied["contact"]["status"] == "on_hold"
+    assert 1 not in contact_ids()
+    assert rows(
+        db_path,
+        "SELECT field, new_value, source_type FROM history"
+        " WHERE entity = 'contact' AND record_id = 1",
+    ) == [("status", "on_hold", "conversation")]
+
+
+def test_network_save_company_refuses_a_duplicate_name_and_writes_history(db_path):
+    before = snapshot(db_path)
+    duplicate = structured("network_save_company", name="banco aurora", source="user")
+    assert duplicate["error"] == "duplicate_company"
+    assert duplicate["company"]["name"] == "Banco Aurora"
+    assert snapshot(db_path) == before
+    saved = confirmed(
+        "network_save_company", company_id=1, name="Banco Aurora", priority="A", source="email"
+    )
+    assert saved["company"]["priority"] == "A"
+    assert rows(
+        db_path,
+        "SELECT field, old_value, new_value, date, source_type FROM history"
+        " WHERE entity = 'company'",
+    ) == [("priority", None, "A", "2026-03-16", "email")]
+    assert (
+        structured("network_save_company", name="Nova", source="user", priority="Z")["error"]
+        == "invalid_input"
+    )
+
+
+def test_network_save_person_with_a_new_company_creates_both(db_path):
+    proposal = structured(
+        "network_save_person", name="Iara Nova", company="Empresa Zeta", source="conversation"
+    )["proposal"]
+    assert [(c["entity"], c["field"]) for c in proposal["changes"]] == [
+        ("company", "name"),
+        ("contact", "name"),
+        ("contact", "company"),
+        ("contact", "status"),
+    ]
+    applied = structured("changes_confirm", proposal_id=proposal["id"])
+    assert applied["contact"]["company"] == "Empresa Zeta"
+    overview = structured("network_company_overview", company_id=applied["contact"]["company_id"])
+    assert [person["name"] for person in overview["people"]] == ["Iara Nova"]
+    assert overview["company"]["suggested_priority"] == "A"
+
+
+def test_changes_discard_drops_the_proposal_without_changing_anything(db_path):
+    before = snapshot(db_path)
+    proposal = structured("update_job", job_id=1, source="user", status="rejected")["proposal"]
+    discarded = structured("changes_discard", proposal_id=proposal["id"])
+    assert discarded == {
+        "proposal": {"id": proposal["id"], "tool": "update_job", "status": "discarded"}
+    }
+    assert structured("changes_confirm", proposal_id=proposal["id"])["error"] == "not_found"
+    assert structured("changes_list_pending") == {"proposals": []}
+    assert snapshot(db_path) == before
+
+
+def test_changes_confirm_refuses_stale_expired_and_unknown_proposals(db_path, monkeypatch):
+    first = structured("update_job", job_id=1, source="user", next_step="Primeira")["proposal"]
+    second = structured("update_job", job_id=1, source="user", next_step="Segunda")["proposal"]
+    assert "error" not in structured("changes_confirm", proposal_id=second["id"])
+    stale = structured("changes_confirm", proposal_id=first["id"])
+    assert stale["error"] == "stale_proposal"
+    assert rows(db_path, "SELECT next_step FROM application WHERE job_id = 1") == [("Segunda",)]
+
+    late = structured("update_job", job_id=2, source="user", next_step="Tarde")["proposal"]
+    monkeypatch.setattr(server, "now", lambda: NOW + timedelta(hours=24))
+    before = snapshot(db_path)
+    assert structured("changes_confirm", proposal_id=late["id"])["error"] == "expired_proposal"
+    assert snapshot(db_path) == before
+    assert structured("changes_confirm", proposal_id="nao-existe")["error"] == "not_found"
+
+
+def test_add_job_refuses_an_empty_source_and_records_the_given_one(db_path):
+    job = {"company": "Empresa Exemplo", "title": "Data Engineer", "url": "https://x.example/2"}
+    empty = structured("add_job", **job, source=" ")
+    assert empty["error"] == "invalid_input"
+    assert "source" in empty["detail"]
+    assert structured("update_job", job_id=1, source="")["error"] == "invalid_input"
+    assert structured("changes_list_pending") == {"proposals": []}
+    created = confirmed("add_job", **job, source="print")
+    assert rows(
+        db_path,
+        "SELECT DISTINCT source_type, source_ref FROM history WHERE entity = 'job'"
+        f" AND record_id = {created['id']}",
+    ) == [("print", None)]
 
 
 def test_list_contacts_filters_by_status_and_company(db_path):
@@ -359,10 +951,10 @@ def test_nothing_is_written_outside_the_temporary_directory(db_path, tmp_path, m
     structured("daily_summary")
     structured("pending_followups")
     structured("list_contacts")
-    structured("add_job", company="Empresa Exemplo", title="Dev", url="https://example.com/vaga")
-    structured("update_job", job_id=16, source="user", status="to_apply")
-    structured("log_interaction", contact_id=2, summary="Conversa")
-    assert len(opened) == 6
+    confirmed("add_job", company="Empresa Exemplo", title="Dev", url="https://example.com/vaga")
+    confirmed("update_job", job_id=16, source="user", status="to_apply")
+    confirmed("log_interaction", contact_id=2, summary="Conversa")
+    assert len(opened) == 9
     assert set(opened) == {db_path.resolve()}
     assert db_path.resolve().is_relative_to(tmp_path.resolve())
     assert [path.name for path in tmp_path.iterdir()] == [db_path.name]
@@ -410,7 +1002,7 @@ def test_seed_option_reports_missing_demo_data_without_blaming_the_database_path
     assert captured.out == ""
     assert captured.err.startswith("Could not read the demo data in")
     assert len(captured.err.strip().splitlines()) == 1
-    assert "jobs.csv" in captured.err
+    assert "companies.csv" in captured.err
     assert db.DB_ENV_VAR not in captured.err
     assert not path.exists()  # no empty database file is left behind
 
