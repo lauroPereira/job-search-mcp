@@ -2,7 +2,7 @@
 
 Servidor [MCP](https://modelcontextprotocol.io) que dá a um agente de IA as ferramentas para gerir uma busca de emprego: empresas, vagas e candidaturas com etapas, contatos de networking, follow-ups, um resumo do que fazer hoje e as métricas do funil.
 
-> **Estado:** versão `v0.2.0` ([notas](docs/releases/v0.2.0.md)): 17 ferramentas, gravação em duas etapas, importação de CSV e migração automática de um banco da `v0.1.0`. A versão estável fica em `main` e o desenvolvimento em `develop`. A `v0.1.0` foi verificada por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)) e em conversa real no Claude Code ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)). A `v0.2.0` foi verificada por cliente programático ([evidência](docs/evidence/2026-10-25-verificacao-v0-2.md)); a conversa real no Claude Code ainda está pendente. O Claude Desktop não foi verificado.
+> **Estado:** versão `v0.2.0` ([notas](docs/releases/v0.2.0.md)): 17 ferramentas, gravação em duas etapas, importação de CSV e migração automática de um banco da `v0.1.0`. A versão estável fica em `main` e o desenvolvimento em `develop`. A `v0.1.0` foi verificada por um cliente MCP programático ([evidência](docs/evidence/2026-10-10-verificacao-dos-casos-de-uso.md)) e em conversa real no Claude Code ([evidência](docs/evidence/2026-10-25-verificacao-manual-claude-code.md)). A `v0.2.0` foi verificada por cliente programático ([evidência](docs/evidence/2026-10-25-verificacao-v0-2.md)); também em conversa real no Claude Code ([evidência](docs/evidence/2026-10-25-verificacao-manual-v0-2.md)). O Claude Desktop não foi verificado.
 
 ## Por que este projeto existe
 
