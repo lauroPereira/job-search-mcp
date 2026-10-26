@@ -38,7 +38,7 @@ Documentar a `v0.2.0`, registrar a evidência dos seis casos de uso e preparar a
 
 ## Critérios de conclusão
 
-- [ ] Todos os critérios de aceitação de `docs/specs/fonte-unica-v0-2.md` marcados, com evidência. Oito de nove marcados; o dos seis casos de uso aguarda a verificação manual no Claude Code.
+- [x] Todos os critérios de aceitação de `docs/specs/fonte-unica-v0-2.md` marcados, com evidência. O dos seis casos de uso foi marcado depois da verificação manual no Claude Code ([evidência](../evidence/2026-10-25-verificacao-manual-v0-2.md)).
 - [x] README coerente com as 17 ferramentas e com a linha de comando.
 - [x] Notas da versão com a mudança de contrato.
 - [x] `python tools/scripts/lint_and_tests.py --strict` sem falhas.
@@ -83,5 +83,5 @@ Pendências:
 ## Status
 
 ```text
-concluída, exceto verificação manual pelo responsável humano
+concluída
 ```
